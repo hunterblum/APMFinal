@@ -1,0 +1,253 @@
+---
+title: "ADS 503 Project"
+author: "Eva Chow"
+date: '2022-06-08'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Libraries
+```{r message=FALSE, warning=FALSE}
+library(haven)
+library(caret)
+library(gridExtra)
+library(corrplot)
+library(tidyverse)
+library(e1071)
+library(car)
+library(dplyr)
+library(ggplot2)
+library(lattice)
+```
+
+# Read in data
+```{r}
+Demographic <- read_xpt("P_DEMO.XPT")
+BodySize <- read_xpt("P_BMX.XPT")
+Chol_ldl <- read_xpt("P_TRIGLY.XPT")
+```
+
+# Create Dataset
+Chol-ldl
+```{r}
+#Select Variables of interest
+Chol_ldl <- Chol_ldl %>% select(SEQN, LBDLDL)
+#NA in target feature won't be useful
+Chol_ldl <- Chol_ldl %>% drop_na()
+```
+
+Demographic
+```{r}
+#Get rid of variables we don't need
+Drop_col <- c('SDDSRVYR', 'RIDSTATR', 'RIDEXMON', 'SIAPROXY', 'SIAINTRP', 'FIAPROXY', 'FIAINTRP', 'MIAPROXY', 'MIAINTRP', 'WTINTPRP', 'WTMECPRP', 'SDMVPSU', 'SDMVSTRA')
+Demographic <- Demographic %>% select(-one_of(Drop_col))
+```
+
+BodySize
+```{r}
+Drop_col <- c('BMIWT', 'BMIRECUM', 'BMIHEAD', 'BMIHT', 'BMILEG', 'BMIARML', 'BMIARMC', 'BMIWAIST', 'BMIHIP', 'BMDSTATS')
+BodySize <- BodySize %>% select(-one_of(Drop_col))
+```
+
+Join
+```{r}
+J1 <- Chol_ldl %>% left_join(Demographic, by = "SEQN")
+Chol <- J1 %>% left_join(BodySize, by = "SEQN")
+Chol <- Chol %>% select(!SEQN)
+```
+
+# Cleaning
+## Changing factors for EDA - May want to use original data for the Regression
+## Changing Variables to the Correct Type 
+```{r}
+Chol_2 <- Chol
+factors <- c("RIAGENDR", "RIDRETH1", "RIDRETH3", "DMDBORN4", "DMDEDUC2", "DMDMARTZ", "RIDEXPRG", "SIALANG", "FIALANG", "MIALANG", "AIALANGA")
+Chol_2[,factors] <- lapply(Chol_2[,factors], factor)
+```
+
+## Change factor levels to be more interpretable
+```{r}
+levels(Chol_2$RIAGENDR) <- c("Male", "Female")
+levels(Chol_2$RIDRETH1) <- c("Mex", "OHis", "White", "Black", "Oth")
+levels(Chol_2$RIDRETH3) <- c("Mex", "OHis", "White", "Black", "Asian", "Oth")
+levels(Chol_2$DMDBORN4) <- c("USA", "Oth", "Ref", "DK")
+levels(Chol_2$DMDYRUSZ) <- c("<5", "5-15", "15-30", ">30", "Ref", "DK")
+levels(Chol_2$DMDEDUC2) <- c("<9", "9-11", "HS", "AA", "BS+", "Ref", "DK")
+levels(Chol_2$DMDMARTZ) <- c("Mar", "Sep", "Nev", "Ref", "DK")
+levels(Chol_2$RIDEXPRG) <- c("Yes", "No", "DK")
+levels(Chol_2$SIALANG) <- c("English", "Spanish")
+levels(Chol_2$FIALANG) <- c("English", "Spanish")
+levels(Chol_2$MIALANG) <- c("English", "Spanish")
+levels(Chol_2$AIALANGA) <- c("English", "Spanish", "Asian")
+```
+
+
+# EDA
+## NAs
+### By Variable - Removed variables with over 3000 observations missing
+```{r message=FALSE, warning=FALSE}
+Variable_na <- Chol_2 %>% select(everything()) %>% summarise_all(funs(sum(is.na(.)))) %>% pivot_longer(cols = c(colnames(Chol_2[,1:ncol(Chol_2)])), names_to = "Variable", values_to = "Missing") %>% arrange(desc(Missing))
+Drop_col <- c("RIDAGEMN", "BMXRECUM", "BMXHEAD", "BMDBMIC", "RIDEXPRG", "DMDYRUSZ")
+Chol_2 <- Chol_2 %>% select(-one_of(Drop_col))
+```
+
+### By Row
+```{r}
+row_na <- rowSums(is.na(Chol_2))
+row_na <- data.frame(row_na, Row = c(1:length(row_na)))
+row_na <- row_na %>% arrange(desc(row_na))
+#Most missing values in a row is 12, not bad
+```
+
+## Distributions
+### Response - LDL Cholesterol
+```{r}
+#Looks like a fairly normal distribution, maybe a little skewed to the right. 
+ggplot(Chol_2, aes(x = LBDLDL)) + geom_histogram() + ggtitle("LDL Distribution Histogram")
+skewness(Chol_2$LBDLDL)
+#skewness value .7886403 confirms very mild skewness to the right
+```
+
+### Predictors
+Factors
+```{r}
+Chol_fact <- Chol_2 %>% select_if(is.factor)
+Chol.bar <- function(xvar){
+  ggplot(Chol_fact, aes_(x = as.name(xvar))) +
+    geom_bar(color = "black") + coord_flip()
+}
+Lang_barplots <- lapply(names(Chol_fact[,7:10]), Chol.bar)
+Oth_barplots <- lapply(names(Chol_fact[,1:6]), Chol.bar)
+grid.arrange(grobs = Lang_barplots, top = "Language Features")
+grid.arrange(grobs = Oth_barplots, top = "Other Demographics")
+```
+
+Numeric
+```{r message=FALSE, warning=FALSE}
+Chol_num <- Chol_2 %>% select_if(is.numeric) %>% select(!LBDLDL)
+Chol.hist <- function(xvar){
+  ggplot(Chol_num, aes_(x = as.name(xvar))) +
+    geom_histogram(color = "black") 
+}
+Dem_hist <- lapply(names(Chol_num[,1:2]), Chol.hist)
+Body_hist <- lapply(names(Chol_num[,3:10]), Chol.hist)
+grid.arrange(grobs = Dem_hist, top = "Demographic Features")
+grid.arrange(grobs = Body_hist, top = "Body Measures")
+```
+
+## Correlations
+Heatmap
+```{r}
+Chol_dummy <- fastDummies::dummy_cols(Chol_2)
+Chol_dummy <- Chol_dummy %>% select_if(~!is.factor(.))
+Chol_dummy[] <- lapply(Chol_dummy, as.numeric)
+Chol_cor <- cor(Chol_dummy, use = "complete.obs")
+Chol_corplot <- corrplot(cor(Chol_dummy, use = "complete.obs"), tl.pos = 'n')
+#Looks like some dummy variables that are refusal could be messing up correlations
+Drop_col <- c("DMDBORN4_Ref", "DMDBORN4_DK", "DMDEDUC2_Ref", "DMDEDUC2_DK", "DMDEDUC2_NA", "DMDMARTZ_Ref", "DMDMARTZ_NA", "FIALANG_NA", "MIALANG_NA", "AIALANGA_NA")
+Chol_dummy_2 <- Chol_dummy %>% select(-one_of(Drop_col))
+cor(Chol_dummy_2, use = "complete.obs")
+corrplot(cor(Chol_dummy_2, use = "complete.obs"), tl.pos = 'n', type = 'lower')
+```
+```{r}
+# Mini Correlations: Sociological Measures:
+socio <- Chol_dummy_2[,c("RIAGENDR_Male","RIAGENDR_Female",
+                       "RIDRETH1_Mex", "RIDRETH1_OHis", "RIDRETH1_White", 
+                       "RIDRETH1_Black", "RIDRETH1_Oth", "RIDRETH3_Mex", "RIDRETH3_OHis",
+                       "RIDRETH3_White", "RIDRETH3_Black", "RIDRETH3_Asian", "RIDRETH3_Oth",
+                       "DMDBORN4_USA", "DMDBORN4_Oth", "DMDEDUC2_<9", "DMDEDUC2_9-11",
+                       "DMDEDUC2_HS", "DMDEDUC2_AA", "DMDEDUC2_BS+","DMDMARTZ_Mar",
+                       "DMDMARTZ_Sep", "DMDMARTZ_Nev", "DMDMARTZ_DK", "SIALANG_English", 
+                       "SIALANG_Spanish", "FIALANG_English", "FIALANG_Spanish",
+                       "MIALANG_English","MIALANG_Spanish", "AIALANGA_English",
+                       "AIALANGA_Spanish", "AIALANGA_Asian", "LBDLDL")]
+
+cor(socio, use = "complete.obs")
+corrplot(cor(socio, use = "complete.obs"), tl.pos = 'y', type = 'lower', 
+         order = "hclust", tl.cex = 0.5)
+```
+```{r}
+# Mini Correlations: Biological Measures:
+biologic <- Chol_dummy_2[,c("RIDAGEYR", "BMXWT", "BMXHT", "BMXBMI", 
+                            "BMXLEG", "BMXARML", "BMXARMC", "BMXWAIST",
+                            "BMXHIP", "RIAGENDR_Male", "RIAGENDR_Female","LBDLDL")]
+cor(biologic, use = "complete.obs")
+corrplot(cor(biologic, use = "complete.obs"), tl.pos = 'y', type = 'lower', 
+         order = "hclust", tl.cex = 0.8)
+# correlations between certain biological measures make sense. BMI is derived from the MASS and height of an individual, so it makes sense that many of the BMI measurements correlate with each other. (i.e. hip, waist, and weight measurements correlate with a higher BMI. Being female correlates negatively with leg and arm length as well as height)
+```
+
+```{r}
+# let's check for highly correlated predictors
+# we'll do this on our non factor transformed dataset
+dim(Chol)
+
+# 27 variables. let's find correlations greater than 0.80 and see how the data looks if removed
+corr_Chol <- cor(Chol)
+
+# if removed, how many variables are left
+high_corr_Chol <- findCorrelation(corr_Chol, cutoff = 0.80)
+no_corr_Chol <- Chol[, -high_corr_Chol]
+dim(no_corr_Chol)
+```
+
+
+## Have been struggling with PCA for this data - Looks like Multiple Factor Analysis is more appopriate anyways. Need to look more into it before actually implementing. 
+
+```{r}
+# looking at a base linear model, to see significant variables 
+model0 <- lm(LBDLDL~., Chol_dummy_2)
+summary(model0)
+  # significant contributors: variable (Pr(>|t|)) 
+    # RIDAGEYR (0.000132)
+    # (Intercept) (0.043474)
+    # MDBORN4Oth (0.076414) 
+    # AIALANGASpanish (0.041803)
+    # BMXLEG (0.033051)
+    # BMXARMC (0.004507) 
+    # BMXWAIST (0.071888)
+```
+
+```{r}
+# looking at VIF for baseline linear:
+vif(model0)
+  # highly/perfectly correlated factors, we might need to drop some
+```
+
+# Degenerate Predictors
+```{r}
+# Let's check for degenerate predictors from the original dataset
+nearZeroVar(Chol, saveMetrics = FALSE)
+deg_chol <- subset(Chol, select=c(4,11,16,18,19))
+colnames(deg_chol)
+
+# Do it again on factor dataset
+nearZeroVar(Chol_2, saveMetrics = FALSE)
+deg_chol2 <- subset(Chol_2, select=c(13))
+colnames(deg_chol2)
+
+# we may have to consider removing depending on the data used for modeling
+```
+
+# Data Splitting
+
+```{r}
+# set the seed and split the data. We'll do an 80/20 split
+set.seed(123)
+Chol_split <- createDataPartition(Chol$LBDLDL, p=0.80, list=FALSE)
+
+# split into train and test
+Chol_train <- Chol[Chol_split,]
+Chol_test <- Chol[-Chol_split,]
+
+# split predictors from teh target
+Chol_train_X <- subset(Chol_train, select=-c(LBDLDL))
+Chol_train_Y <- Chol_train$LBDLDL
+
+Chol_test_X <- subset(Chol_test, select=-c(LBDLDL))
+Chol_train_Y <- Chol_test$LBDLDL
+```
+
