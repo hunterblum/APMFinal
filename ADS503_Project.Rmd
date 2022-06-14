@@ -10,18 +10,27 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 # Libraries
+## REMOVE NOTE LATER - ggplot and dplyr are part of tidyverse, so removed them. 
 ```{r message=FALSE, warning=FALSE}
 library(haven)
 library(caret)
 library(gridExtra)
 library(corrplot)
-library(tidyverse)
 library(e1071)
 library(car)
-library(dplyr)
-library(ggplot2)
 library(lattice)
+library(doParallel)
+library(RANN)
+
+library(tidyverse)
 ```
+
+# Set up Parallelization - Note, you can reduce number of clusters if needed not sure if R does it automatically if you set over the number of cores on your CPU
+```{r}
+cl <- makeCluster(6)
+registerDoParallel(cl)
+```
+
 
 # Read in data
 ```{r}
@@ -60,7 +69,7 @@ Chol <- Chol %>% select(!SEQN)
 ```
 
 # Cleaning
-## Changing factors for EDA - May want to use original data for the Regression
+## Changing factors for EDA 
 ## Changing Variables to the Correct Type 
 ```{r}
 Chol_2 <- Chol
@@ -180,6 +189,7 @@ corrplot(cor(biologic, use = "complete.obs"), tl.pos = 'y', type = 'lower',
 # correlations between certain biological measures make sense. BMI is derived from the MASS and height of an individual, so it makes sense that many of the BMI measurements correlate with each other. (i.e. hip, waist, and weight measurements correlate with a higher BMI. Being female correlates negatively with leg and arm length as well as height)
 ```
 
+# REMOVE NOTE LATER - MAY NEED TO USE DUMMY CHOL DATA FOR HIGH CORRELATIONS - REGULAR CHOL STILL HAS CATEGORICAL VARIABLES AS SINGLE NUMERIC VARIABLES.
 ```{r}
 # let's check for highly correlated predictors
 # we'll do this on our non factor transformed dataset
@@ -193,13 +203,22 @@ high_corr_Chol <- findCorrelation(corr_Chol, cutoff = 0.80)
 no_corr_Chol <- Chol[, -high_corr_Chol]
 dim(no_corr_Chol)
 ```
-
-
-## Have been struggling with PCA for this data - Looks like Multiple Factor Analysis is more appopriate anyways. Need to look more into it before actually implementing. 
+# Checking things above with Dummy Variable Data
+## CURRENTLY TESTING STUFF HERE FOR HOW TO DEAL WITH DUMMY DATA WITH COR
+```{r}
+testdata <- Chol_dummy
+testdata <- apply(Chol_dummy, 2, function(y) {y[!is.finite(y)] = NA; y})
+testdata <- testdata[complete.cases(testdata), ]
+testdata <- testdata[, -nearZeroVar(testdata)]
+testdata <- data.frame(testdata)
+dim(Chol_dummy)
+Cor_chol_dummy <- cor(testdata)
+high_corr_dummy <- findCorrelation(Cor_chol_dummy, cutoff = 0.8)
+```
 
 ```{r}
 # looking at a base linear model, to see significant variables 
-model0 <- lm(LBDLDL~., Chol_dummy_2)
+model0 <- lm(LBDLDL~., Chol_2)
 summary(model0)
   # significant contributors: variable (Pr(>|t|)) 
     # RIDAGEYR (0.000132)
@@ -232,22 +251,70 @@ colnames(deg_chol2)
 # we may have to consider removing depending on the data used for modeling
 ```
 
-# Data Splitting
 
+
+# Splitting
+#NOTE SWITCHED TRAINING TO DUMMY
 ```{r}
 # set the seed and split the data. We'll do an 80/20 split
 set.seed(123)
 Chol_split <- createDataPartition(Chol$LBDLDL, p=0.80, list=FALSE)
 
 # split into train and test
-Chol_train <- Chol[Chol_split,]
-Chol_test <- Chol[-Chol_split,]
+Chol_train <- Chol_dummy[Chol_split,]
+Chol_test <- Chol_dummy[-Chol_split,]
 
-# split predictors from teh target
-Chol_train_X <- subset(Chol_train, select=-c(LBDLDL))
-Chol_train_Y <- Chol_train$LBDLDL
+# split predictors from the target
+Chol_train_X <- as.data.frame(subset(Chol_train, select=-c(LBDLDL))) 
+Chol_train_y <- Chol_train$LBDLDL
 
-Chol_test_X <- subset(Chol_test, select=-c(LBDLDL))
-Chol_train_Y <- Chol_test$LBDLDL
+Chol_test_X <- as.data.frame(subset(Chol_test, select=-c(LBDLDL)))
+Chol_test_y <- Chol_test$LBDLDL
+
+# Creating imputed data sets
+Chol_imp <- preProcess(Chol_train_X, method = c("center", "scale", "knnImpute"))
+Chol_train_X_imp <- predict(Chol_imp, Chol_train_X)
+Chol_test_X_imp <- predict(Chol_imp, Chol_test_X)
+
+# Adding Resampling/Validation Set and Control 
+set.seed(123)
+Chol_folds <- createFolds(y = Chol_train_X, k = 10, returnTrain = T)
+Chol_control <- trainControl(method = "cv", index = Chol_folds)
 ```
+
+
+# Linear Models - Hunter
+## OLS 
+### Create Initial Model
+```{r}
+Chol_ols_tune <- train(x = Chol_train_X_imp, y = Chol_train_y, method = "lm", trControl = Chol_control)
+plot(Chol_ols_tune$finalModel)
+```
+### FIX TRAINING SET
+```{r}
+# VIF shows aliased coefficients, need to get rid of those by removing high cor predictors
+test <- cor(Chol_train_X_imp)
+# Also have an issue with DMDEDUC2_DK all being zero so get rid of high var predictors
+Chol_tr_x_imp_vr <- Chol_train_X_imp[, -nearZeroVar(Chol_train_X_imp)]
+Chol_tr_X_imp_fin <- Chol_tr_x_imp_vr[, -findCorrelation(cor(Chol_tr_x_imp_vr), cutoff = 0.9)] 
+```
+
+### Tune Another Model
+```{r}
+Chol_ols_tune2 <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "lm", trControl = Chol_control)
+plot(Chol_ols_tune2$finalModel)
+summary(Chol_ols_tune2$finalModel)
+```
+
+### Final OLS Model
+```{r}
+Chol_sig_tr <- Chol_tr_X_imp_fin %>% select(RIDAGEYR, BMXHT, BMXBMI, BMXLEG, BMXARMC,  DMDBORN4_Oth, DMDEDUC2_NA, MIALANG_NA, AIALANGA_NA)
+Chol_ols <- train(x = Chol_sig_tr, y = Chol_train_y, method = "lm", trControl = Chol_control)
+plot(Chol_ols$finalModel)
+summary(Chol_ols$finalModel)
+
+#Predict on test data
+Chol_ols_res <- predict(Chol_ols, Chol_test_X)
+```
+
 
