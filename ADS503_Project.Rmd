@@ -254,7 +254,7 @@ colnames(deg_chol2)
 
 
 # Splitting
-#NOTE SWITCHED TRAINING TO DUMMY
+## NOTE SWITCHED TRAINING TO DUMMY
 ```{r}
 # set the seed and split the data. We'll do an 80/20 split
 set.seed(123)
@@ -282,6 +282,25 @@ Chol_folds <- createFolds(y = Chol_train_X, k = 10, returnTrain = T)
 Chol_control <- trainControl(method = "cv", index = Chol_folds)
 ```
 
+## Numeric training data set with just the numeric variables and gender (Just going off a hunch that having too many dummy variables is hurting linear model performance).
+```{r}
+Drop_col <- c('RIDRETH1', 'RIDRETH3', 'DMDBORN4', 'DMDEDUC2', 'DMDMARTZ', 'SIALANG', 'FIALANG', 'MIALANG', 'AIALANGA', 'LBDLDL')
+Chol_num <- Chol_2 %>% select(-one_of(Drop_col))
+
+Chol_num_tr_X <- as.data.frame(Chol_num[Chol_split, ])
+Chol_num_test_X <- as.data.frame(Chol_num[Chol_split, ])
+
+#Preprocess
+Chol_imp <- preProcess(Chol_num_tr_X, method = c("center", "scale", "knnImpute"))
+Chol_num_tr_X <- predict(Chol_imp, Chol_num_tr_X)
+Chol_num_test_X <- predict(Chol_imp, Chol_num_test_X)
+
+# Adding Resampling/Validation Set and Control 
+set.seed(123)
+Chol_folds_num <- createFolds(y = Chol_num_tr_X, k = 10, returnTrain = T)
+Chol_control_num <- trainControl(method = "cv", index = Chol_folds_num)
+```
+
 
 # Linear Models - Hunter
 ## OLS 
@@ -306,6 +325,23 @@ plot(Chol_ols_tune2$finalModel)
 summary(Chol_ols_tune2$finalModel)
 ```
 
+### Tune model with BoxCox to see if it will help normality issues - Didn't do much, we'll just stick with the non-transformed data
+```{r}
+Chol_bct <- preProcess(Chol_tr_X_imp_fin, method = "BoxCox")
+Chol_tr_boxcox <- predict(Chol_bct, Chol_tr_X_imp_fin)
+
+Chol_ols_tune3 <- train(x = Chol_tr_boxcox, y = Chol_train_y, method = "lm", trControl = Chol_control)
+plot(Chol_ols_tune3$finalModel)
+summary(Chol_ols_tune3$finalModel)
+```
+
+### Try reduced data - Didn't really help our diagnostic plot, so we'll go with the regular dummy data
+```{r}
+Chol_ols_tune_num <- train(x = Chol_num_tr_X, y = Chol_train_y, method = "lm", trControl = Chol_control_num, preProc = "BoxCox")
+plot(Chol_ols_tune_num$finalModel)
+summary(Chol_ols_tune_num$finalModel)
+```
+
 ### Final OLS Model
 ```{r}
 Chol_sig_tr <- Chol_tr_X_imp_fin %>% select(RIDAGEYR, BMXHT, BMXBMI, BMXLEG, BMXARMC,  DMDBORN4_Oth, DMDEDUC2_NA, MIALANG_NA, AIALANGA_NA)
@@ -317,4 +353,96 @@ summary(Chol_ols$finalModel)
 Chol_ols_res <- predict(Chol_ols, Chol_test_X)
 ```
 
+## PCR and PLS
+### PCR
+```{r}
+set.seed(123)
+Chol_pcr <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "pcr", tuneGrid = expand.grid(ncomp=1:32), trControl = Chol_control)
+Chol_pcr
 
+set.seed(123)
+Chol_pcr_box <- train(x = Chol_tr_boxcox, y = Chol_train_y, method = "pcr", tuneGrid = expand.grid(ncomp=1:32), trControl = Chol_control)
+Chol_pcr_box
+
+set.seed(123)
+Chol_pcr_num <- train(x = Chol_num_tr_X, y = Chol_train_y, method = "pcr", tuneGrid = expand.grid(ncomp=1:8), trControl = Chol_control_num)
+Chol_pcr_num
+
+pcr_resamp <- Chol_pcr$results
+pcr_resamp$Model <- "PCR"
+
+box_pcr_resamp <- Chol_pcr_box$results
+box_pcr_resamp$Model <- "BPCR"
+
+num_pcr_resamp <- Chol_pcr_num$results
+num_pcr_resamp$Model <- "PCR"
+```
+
+### PLS
+```{r}
+set.seed(123)
+Chol_pls <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "pls", tuneGrid = expand.grid(ncomp = 1:32), trControl = Chol_control)
+Chol_pls
+
+set.seed(123)
+Chol_pls_box <- train(x = Chol_tr_boxcox, y = Chol_train_y, method = "pls", tuneGrid = expand.grid(ncomp = 1:32), trControl = Chol_control)
+Chol_pls_box
+
+set.seed(123)
+Chol_pls_num <- train(x = Chol_num_tr_X, y = Chol_train_y, method = "pls", tuneGrid = expand.grid(ncomp = 1:8), trControl = Chol_control_num)
+Chol_pls_num
+
+pls_resamp <- Chol_pls_tune$results
+pls_resamp$Model <- "PLS"
+
+pls_box_resamp <- Chol_pls_box$results
+pls_box_resamp$Model <- "BPLS"
+
+pls_num_resamp <- Chol_pls_num$results
+pls_num_resamp$Model <- "PLS"
+```
+
+### Compare
+
+```{r}
+plot_data <- rbind(pcr_resamp, box_pcr_resamp, pls_resamp, pls_box_resamp)
+xyplot(RMSE ~ ncomp, data = plot_data, xlab = "# of Components", ylab = "RMSE (Cross-validation)", auto.key = list(columns = 4), groups = Model, type = c("o", "g"))
+
+plot2_data <- rbind(num_pcr_resamp, pls_num_resamp)
+xyplot(RMSE ~ ncomp, data = plot2_data, xlab = "# of Components", ylab = "RMSE (Cross-validation)", auto.key = list(columns = 2), groups = Model, type = c("o", "g"))
+```
+
+## Penalized Models
+### Ridge
+```{r}
+set.seed(123)
+Chol_ridge <- train(x = Chol_tr_X_imp_fin, y= Chol_train_y, method = "ridge", tuneGrid = expand.grid(lambda = seq(0, .1, length = 15)), trControl = Chol_control)
+Chol_ridge
+
+set.seed(123)
+Chol_ridge_box <- train(x = Chol_tr_boxcox, y= Chol_train_y, method = "ridge", tuneGrid = expand.grid(lambda = seq(0, .1, length = 15)), trControl = Chol_control)
+Chol_ridge_box
+
+set.seed(123)
+#Chol_ridge_num <- train(x = Chol_num_tr_X, y= Chol_train_y, method = "ridge",  trControl = Chol_control_n)
+#Chol_ridge_num
+
+print(update(plot(Chol_ridge), xlab = "Penalty"))
+print(update(plot(Chol_ridge_box), xlab = "Penalty"))
+```
+
+### Elastic Net - having trouble getting numeric data to run through it
+```{r}
+enet_grid <- expand.grid(lambda = c(0, 0.01, 0.1), fraction = seq(0.05, 1, length = 20))
+
+Chol_enet <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "enet", tuneGrid = enet_grid, trControl = Chol_control)
+Chol_enet
+
+Chol_enet_box <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "enet", tuneGrid = enet_grid, trControl = Chol_control)
+Chol_enet_box
+
+#Chol_enet_num <- train(x = as.matrix(Chol_tr_X_imp_fin), y = Chol_train_y, method = "enet", tuneGrid = enet_grid, trControl = Chol_control_num)
+
+plot(Chol_enet)
+plot(Chol_enet_box)
+```
