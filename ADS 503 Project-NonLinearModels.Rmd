@@ -434,8 +434,74 @@ nnet1 <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y,
                   linout = TRUE,
                   trace = FALSE,
                   MaxNWts = 13 * (ncol(Chol_tr_X_imp_fin) + 1) + 13 + 1,
-                  maxit = 100)
+                  maxit = 50)
 nnet1
 plot(nnet1, main="NNET initial")
+```
+
+# messing around with predictor set
+```{r}
+expDropC <- c("RIDRETH1_Black", "RIDRETH1_Mex", "RIDRETH1_OHis", 
+               "RIDRETH1_Oth", "RIDRETH1_White", "BMXBMI")
+Xtrial_tr <- subset(Chol_train_X_imp, select = !(names(Chol_train_X_imp) %in% expDropC))
+# looking for near zero var:
+Xtri_nzv <- nearZeroVar(Xtrial_tr)
+  # "DMDBORN4_Ref", "DMDBORN4_DK", "DMDEDUC2_Ref", "DMDEDUC2_DK", "DMDMARTZ_Ref",
+    # "DMDMARTZ_DK", "AIALANGA_Asian"
+Xtri_tr_nz <- subset(Xtrial_tr, select = -c(Xtri_nzv))
+print(paste("Xtrial_tr ncol: ", ncol(Xtrial_tr), " NZV removed, new ncol: ", ncol(Xtri_tr_nz)))
+
+# dropping SIALANG groups (sample person interview instrument lang)
+expDropC <- c("SIALANG_English", "SIALANG_Spanish", 
+              "MIALANG_English", "MIALANG_Spanish", "MIALANG_NA")
+Xtri_tr_nz <- subset(Xtri_tr_nz, select = !(names(Xtri_tr_nz) %in% expDropC))
+print(paste("Xtrial_tr ncol: ", ncol(Xtrial_tr), " NZV removed, new ncol: ", ncol(Xtri_tr_nz)))
+
+#looking for high corr:
+Xtritr_hiC <- findCorrelation(cor(Xtri_tr_nz), cutoff = 0.8)
+Xtritr_hiC
+  # "AIALANGA_English", "DMDBORN4_USA", "BMXWT", "FIALANG_English", 
+  # "BMXWAIST", "BMXHIP", "DMDEDUC2_NA", "RIAGENDR_Male"
+
+Xtritr_hiC <- subset(Xtri_tr_nz, select = c("AIALANGA_English", "DMDBORN4_USA", 
+                                            "BMXWT", "FIALANG_English", "BMXWAIST",
+                                            "BMXHIP", "DMDEDUC2_NA", "RIAGENDR_Male"))
+cor(Xtritr_hiC)
+corrplot(cor(Xtritr_hiC), order = "hclust", type="lower")
+
+#dropping "BMXHIP", "BMXWAIST", DMDEDUC2_<9 (recurring issues in model attempts)
+drophiC <- c("BMXHIP", "BMXWAIST", "DMDEDUC2_<9")
+X_trial_train <- subset(Xtri_tr_nz, select = !(names(Xtri_tr_nz) %in% drophiC))
+corrplot(cor(X_trial_train), order = "hclust", type="lower")
+
+```
+
+```{r}
+# making X_trial_test match columns of X_trial_train
+keepsies <- colnames(X_trial_train)
+X_trial_test <- subset(Chol_test_X_imp, select = c(keepsies))
+```
+
+
+```{r}
+#svm radial with X_trial_train and log adjusted y
+log_Y_train <- log10(Chol_train_y)
+hist(log_Y_train)
+log_Y_test <- log10(Chol_test_y)
+
+#model
+set.seed(123)
+svmR_trial <- train(x=X_trial_train, y = log_Y_train,
+               method = "svmRadial",
+               preProcess = c("center", "scale"),
+               tuneLength = 14,
+               trControl = Chol_control)
+svmR_trial
+# issues in: DMDEDUC2_<9, 
+  # final model uses: 
+plot(svmR_trial, scales = list(x = list(log = 2)), main="SVM-Radial with X_trial_train and Log Y")
+svmR_trial$finalModel
+trialPred <- data.frame(obs=log_Y_test)
+trialPred$svmRad <- predict(svmR_trial, X_trial_test)
 ```
 
