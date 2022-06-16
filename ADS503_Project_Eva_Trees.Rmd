@@ -27,6 +27,7 @@ library(partykit)
 library(tidyverse)
 library(rpart.plot)
 library(randomForest)
+library(RWeka)
 ```
 
 # Set up Parallelization - Note, you can reduce number of clusters if needed not sure if R does it automatically if you set over the number of cores on your CPU
@@ -474,19 +475,32 @@ postResample(pred = Chol_rpart_pred, obs = Chol_test_y)
 # Chol_ctree <- ctree(Chol_train_y ~., data = Chol_tr_X_imp_fin)
 
 # summary(Chol_ctree)
+# will attempt again
 ```
 
 ## Random Forest
 ```{r}
 set.seed(123)
-Chol_rf_model <- randomForest(Chol_train_y~ ., data = Chol_tr_X_imp_fin)
-which.min(Chol_rf_model$mse)
+# error in Chol_tr_X_imp_fin with DMDEDUC2_<9 not being found? will drop and train without until investigated further
+Chol_tr_X_imp_rfdrop <- subset(Chol_tr_X_imp_fin, select = -c(DMD))
 
-Chol_rf <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "rf", tuneLength = 15, trControl = Chol_control)
+Chol_rf_model <- randomForest(Chol_train_y ~ ., data = Chol_tr_X_imp_rfdrop)
+which.min(Chol_rf_model$mse) # this will tell the number of trees to get lowest MSE
+
+Chol_rf <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "rf", tuneLength = 10, trControl = Chol_control)
 Chol_rf
 plot(Chol_rf)
 
 Chol_rf_pred <- predict(Chol_rf, Chol_test_X_imp)
 postResample(pred = Chol_rf_pred, obs = Chol_test_y)
+```
+
+## Model Trees (M5)
+```{r message=FALSE, warning=FALSE}
+# decision tree with linear regression at terminal nodes to predict continuous variables
+set.seed(123)
+Chol_M5 <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "M5", trControl = Chol_control, control = Weka_control(M=10))
+
+plot(Chol_M5)
 ```
 
