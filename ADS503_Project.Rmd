@@ -286,9 +286,12 @@ Chol_control <- trainControl(method = "cv", index = Chol_folds)
 ```{r}
 Drop_col <- c('RIDRETH1', 'RIDRETH3', 'DMDBORN4', 'DMDEDUC2', 'DMDMARTZ', 'SIALANG', 'FIALANG', 'MIALANG', 'AIALANGA', 'LBDLDL')
 Chol_num <- Chol_2 %>% select(-one_of(Drop_col))
+Chol_dummy <- fastDummies::dummy_cols(Chol_num)
+Chol_num <- Chol_dummy %>% select_if(~!is.factor(.))
+Chol_num[] <- lapply(Chol_num, as.numeric)
 
 Chol_num_tr_X <- as.data.frame(Chol_num[Chol_split, ])
-Chol_num_test_X <- as.data.frame(Chol_num[Chol_split, ])
+Chol_num_test_X <- as.data.frame(Chol_num[-Chol_split, ])
 
 #Preprocess
 Chol_imp <- preProcess(Chol_num_tr_X, method = c("center", "scale", "knnImpute"))
@@ -325,7 +328,7 @@ plot(Chol_ols_tune2$finalModel)
 summary(Chol_ols_tune2$finalModel)
 ```
 
-### Tune model with BoxCox to see if it will help normality issues - Didn't do much, we'll just stick with the non-transformed data
+### Tune model with BoxCox to see if it will help normality issues - Didn't do much, we'll just stick with the non-transformed data. Also tried transformin LDL, didn't work either.
 ```{r}
 Chol_bct <- preProcess(Chol_tr_X_imp_fin, method = "BoxCox")
 Chol_tr_boxcox <- predict(Chol_bct, Chol_tr_X_imp_fin)
@@ -337,7 +340,7 @@ summary(Chol_ols_tune3$finalModel)
 
 ### Try reduced data - Didn't really help our diagnostic plot, so we'll go with the regular dummy data
 ```{r}
-Chol_ols_tune_num <- train(x = Chol_num_tr_X, y = Chol_train_y, method = "lm", trControl = Chol_control_num, preProc = "BoxCox")
+Chol_ols_tune_num <- train(x = Chol_num_tr_X, y = Chol_train_y, method = "lm", trControl = Chol_control_num)
 plot(Chol_ols_tune_num$finalModel)
 summary(Chol_ols_tune_num$finalModel)
 ```
@@ -392,7 +395,7 @@ set.seed(123)
 Chol_pls_num <- train(x = Chol_num_tr_X, y = Chol_train_y, method = "pls", tuneGrid = expand.grid(ncomp = 1:8), trControl = Chol_control_num)
 Chol_pls_num
 
-pls_resamp <- Chol_pls_tune$results
+pls_resamp <- Chol_pls$results
 pls_resamp$Model <- "PLS"
 
 pls_box_resamp <- Chol_pls_box$results
@@ -420,15 +423,16 @@ Chol_ridge <- train(x = Chol_tr_X_imp_fin, y= Chol_train_y, method = "ridge", tu
 Chol_ridge
 
 set.seed(123)
-Chol_ridge_box <- train(x = Chol_tr_boxcox, y= Chol_train_y, method = "ridge", tuneGrid = expand.grid(lambda = seq(0, .1, length = 15)), trControl = Chol_control)
+Chol_ridge_box <- train(x = Chol_tr_boxcox, y= Chol_train_y, method = "ridge", tuneGrid = expand.grid(lambda = seq(0, .5, length = 15)), trControl = Chol_control)
 Chol_ridge_box
 
 set.seed(123)
-#Chol_ridge_num <- train(x = Chol_num_tr_X, y= Chol_train_y, method = "ridge",  trControl = Chol_control_n)
-#Chol_ridge_num
+Chol_ridge_num <- train(x = Chol_num_tr_X, y= Chol_train_y, method = "ridge", tuneGrid = expand.grid(lambda = seq(0, .5, length = 15)), trControl = Chol_control_num)
+Chol_ridge_num
 
 print(update(plot(Chol_ridge), xlab = "Penalty"))
 print(update(plot(Chol_ridge_box), xlab = "Penalty"))
+print(update(plot(Chol_ridge_num), xlab = "Penalty"))
 ```
 
 ### Elastic Net - having trouble getting numeric data to run through it
@@ -441,8 +445,43 @@ Chol_enet
 Chol_enet_box <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "enet", tuneGrid = enet_grid, trControl = Chol_control)
 Chol_enet_box
 
-#Chol_enet_num <- train(x = as.matrix(Chol_tr_X_imp_fin), y = Chol_train_y, method = "enet", tuneGrid = enet_grid, trControl = Chol_control_num)
+Chol_enet_num <- train(x = Chol_num_tr_X, y = Chol_train_y, method = "enet", tuneGrid = enet_grid, trControl = Chol_control_num)
 
 plot(Chol_enet)
 plot(Chol_enet_box)
+plot(Chol_enet_num)
 ```
+
+## Gather Results from Linear Models
+Note: No diagnostic plot showed much of a difference between boxcox vs. regular (not suprising given normality in histograms), so we'll just use the regular constructed models
+
+### Create Data set of predictions and observed
+```{r}
+Res_OLS <- predict(Chol_ols, Chol_test_X_imp)
+Res_OLS_num <- predict(Chol_ols_tune_num, Chol_num_test_X)
+Res_PLS <- predict(Chol_pls, Chol_test_X_imp)
+Res_PLS_num <- predict(Chol_pls_num, Chol_num_test_X)
+Res_PCR <- predict(Chol_pcr, Chol_test_X_imp)
+Res_PCR_num <- predict(Chol_pcr_num, Chol_num_test_X)
+Res_Ridge <- predict(Chol_ridge, Chol_test_X_imp)
+Res_Ridge_num <- predict(Chol_ridge_num, Chol_num_test_X)
+Res_Enet <- predict(Chol_enet, Chol_test_X_imp)
+Res_Enet_num <- predict(Chol_enet_num, Chol_num_test_X)
+
+Linear_res <- cbind.data.frame(Observed = Chol_test_y, OLS = Res_OLS, OLS_num = Res_OLS_num, PLS = Res_PLS, PLS_num = Res_PLS_num, PCR = Res_PCR, PCR_num = Res_PCR_num ,Ridge = Res_Ridge, Ridge_num = Res_Ridge_num, ENet = Res_Enet, ENet_num = Res_Enet_num)
+```
+
+### Get RMSE and Plot
+```{r}
+find_rmse <- function(x){
+  caret::RMSE(x, Linear_res[,"Observed"])
+}
+
+RMSE_results <- apply(X = Linear_res[,2:11], FUN = find_rmse, MARGIN = 2)
+RMSE_results <- data.frame(RMSE_results)
+RMSE_results$Model <- rownames(RMSE_results)
+
+
+ggplot(RMSE_results, aes(x=reorder(Model, -RMSE_results), y=RMSE_results)) + geom_segment(aes(x=reorder(Model, -RMSE_results), xend = reorder(Model, -RMSE_results), y=30, yend=RMSE_results), color = "cadetblue") + geom_point(color = "darkblue", size = 10) + coord_flip() + ylab("RMSE") + geom_text(aes(label = round(RMSE_results, 2)), color = "white", size = 2.5)
+```
+
