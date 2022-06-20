@@ -28,6 +28,8 @@ library(tidyverse)
 library(rpart.plot)
 library(randomForest)
 library(RWeka)
+library(gbm)
+library(Cubist)
 ```
 
 # Set up Parallelization - Note, you can reduce number of clusters if needed not sure if R does it automatically if you set over the number of cores on your CPU
@@ -455,8 +457,9 @@ plot(Chol_enet_box)
 # Regression Trees - Eva
 ## Single Regression Trees
 ### Tree with CART based splits (rpart) and optimization with default parameters
-```{r}
+```{r message=FALSE, warning=FALSE}
 set.seed(123)
+# let's see how it splits the training data
 Chol_rpart <- rpart(Chol_train_y ~., data = Chol_tr_X_imp_fin, cp = 0.003)
 
 summary(Chol_rpart)
@@ -466,41 +469,91 @@ rpart.plot(Chol_rpart)
 Chol_rpart_tune <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "rpart", cp = 0.003)
 Chol_rpart_pred <- predict(Chol_rpart_tune, Chol_test_X_imp)
 postResample(pred = Chol_rpart_pred, obs = Chol_test_y)
-# Rsquared value of 0.066 isn't too great, but let's compare to other trees
+# Rsquared value of 0.066 isn't too great. RMSE of 33.0. Let's compare to other trees
+```
+### Tree with CART based splits (rpart2 to tune over max depth)
+```{r}
+set.seed(123)
+Chol_rpart2_tune <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "rpart2", cp = 0.003)
+Chol_rpart2_pred <- predict(Chol_rpart2_tune, Chol_test_X_imp)
+postResample(pred = Chol_rpart2_pred, obs = Chol_test_y)
+# minor improvement? Rsquared value of 0.071 and RMSE of 32.9
 ```
 
-### ctree
-```{r}
-# set.seed(123)
-# Chol_ctree <- ctree(Chol_train_y ~., data = Chol_tr_X_imp_fin)
 
-# summary(Chol_ctree)
-# will attempt again
+## Bagged Trees
+```{r}
+set.seed(123)
+Chol_bagtree <- train(x=Chol_tr_X_imp_fin, y = Chol_train_y, method = "treebag", nbagg = 70, trControl = Chol_control)
+Chol_bagtree
+# Rsquared value of 0.033. RMSE is 35.3. Still not fantastic
 ```
 
 ## Random Forest
 ```{r}
 set.seed(123)
-# error in Chol_tr_X_imp_fin with DMDEDUC2_<9 not being found? will drop and train without until investigated further
-Chol_tr_X_imp_rfdrop <- subset(Chol_tr_X_imp_fin, select = -c(DMD))
 
-Chol_rf_model <- randomForest(Chol_train_y ~ ., data = Chol_tr_X_imp_rfdrop)
-which.min(Chol_rf_model$mse) # this will tell the number of trees to get lowest MSE
+rfmtryValues <- seq(1,10,1)
 
-Chol_rf <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "rf", tuneLength = 10, trControl = Chol_control)
+Chol_rf <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "rf", ntree = 300, tuneGrid = data.frame(mtry=rfmtryValues), trControl=Chol_control) # 300 trees provides the highest Rsquared value when checking with test data
 Chol_rf
 plot(Chol_rf)
 
 Chol_rf_pred <- predict(Chol_rf, Chol_test_X_imp)
 postResample(pred = Chol_rf_pred, obs = Chol_test_y)
+# Rsquared value of 0.077. RMSE of 33.1
 ```
 
-## Model Trees (M5)
+## Boosted Trees
+```{r}
+# some control parameters
+gbmGrid <- expand.grid(interaction.depth = c(1,3,5,7,9), n.trees=300, shrinkage = c(0.01, 0.1), n.minobsinnode=5)
+
+set.seed(123)
+Chol_gbm <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "gbm", tuneGrid = gbmGrid, verbose = FALSE, trControl = Chol_control)
+Chol_gbm
+
+Chol_gbm_pred <- predict(Chol_gbm, Chol_test_X_imp)
+postResample(pred = Chol_gbm_pred, obs = Chol_test_y)
+# RMSE 32.9 and Rsquared 0.081
+```
+
+## Model Trees
+### Model Trees (M5)
 ```{r message=FALSE, warning=FALSE}
 # decision tree with linear regression at terminal nodes to predict continuous variables
 set.seed(123)
 Chol_M5 <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "M5", trControl = Chol_control, control = Weka_control(M=10))
 
 plot(Chol_M5)
+
+Chol_M5_pred <- predict(Chol_M5, Chol_test_X_imp)
+postResample(pred = Chol_M5_pred, obs = Chol_test_y)
+# Rsquared value of 0.076 and RMSE of 33.6
+```
+
+### Model Tree (Rule Based M5)
+```{r message=FALSE, warning=FALSE}
+# decision tree with linear regression at terminal nodes to predict continuous variables
+set.seed(123)
+Chol_M5rules <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "M5Rules", trControl = Chol_control, control = Weka_control(M=10))
+
+plot(Chol_M5rules)
+
+Chol_M5rules_pred <- predict(Chol_M5rules, Chol_test_X_imp)
+postResample(pred = Chol_M5rules_pred, obs = Chol_test_y)
+# Slight improvement, Rsquared value of 0.087 and RMSE of 32.8
+```
+
+## Cubist
+```{r}
+set.seed(123)
+Chol_cube <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "cubist", trControl = Chol_control)
+
+plot(Chol_cube)
+
+Chol_cube_pred <- predict(Chol_cube, Chol_test_X_imp)
+postResample(pred = Chol_cube_pred, obs = Chol_test_y)
+# "Best performing" so far, but ever so slightly over the other models. Rsquared of 0.092 and RMSE of 32.6
 ```
 
