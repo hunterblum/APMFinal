@@ -22,12 +22,13 @@ library(lattice)
 library(doParallel)
 library(RANN)
 library(tidyverse)
+library(earth)
 ```
 
 # Set up Parallelization - Note, you can reduce number of clusters if needed not sure if R does it automatically if you set over the number of cores on your CPU
 ```{r}
-# cl <- makeCluster(6)
-# registerDoParallel(cl)
+cl <- makeCluster(4)
+registerDoParallel(cl)
 ```
 
 
@@ -317,6 +318,7 @@ svmR0 <- train(x=Chol_tr_X_imp_fin, y = Chol_train_y,
                trControl = Chol_control)
 svmR0
   # final model uses: sigma = 0.0207376 and C = 0.25
+  # RMSE: 35.40559, Rsquared: 0.019455264
 plot(svmR0, scales = list(x = list(log = 2)), main="SVM-Radial Initial")
 ```
 
@@ -340,11 +342,9 @@ svmR1 <- train(x=Chol_tr_X_impfin_sv, y = Chol_train_y,
                trControl = Chol_control)
 svmR1
   # final model uses: sigma = 0.02231109 and C = 0.25.
+  # RMSE: 35.32135, Rsquared: 0.018362258 
 plot(svmR1, scales = list(x = list(log = 2)), main="SVM-Radial v2")
 svmR1$finalModel
-# svm-radial predictions
-NonLpred <- data.frame(obs=Chol_test_y)
-NonLpred$svmR <- predict(svmR1, Chol_te_X_sv)
 ```
 
 ### Create Polynomial Model
@@ -359,12 +359,12 @@ svmP <- train(x=Chol_tr_X_impfin_sv, y = Chol_train_y,
                                       C = 2^(-2:5)),
                trControl = Chol_control)
 svmP
-  # final model uses: sigma = 0.02231109 and C = 0.25.
+  # final model uses: degree = 2, scale =  0.001,  offset =  1 
+  # sigma = 0.02231109 and C = 0.25.
+  # RMSE: 35.57248, Rsquared: 0.004595661
 plot(svmP, scales = list(x = list(log = 2),
                          between=list(x=.5, y=1)), main="SVM-Polynomial")
 svmP$finalModel
-# svm-poly predictions
-NonLpred$svmP <- predict(svmP, Chol_te_X_sv)
 ```
 
 
@@ -380,10 +380,9 @@ knnTune <- train(x=Chol_tr_X_impfin_sv, y = Chol_train_y,
                trControl = Chol_control)
 knnTune
   # final model uses: k=40
+  # RMSE: 35.63394, Rsquared: 0.0006650456
 plot(knnTune, main="KNN")
 knnTune$finalModel
-# knnTune predictions
-NonLpred$KNN <- predict(knnTune, Chol_te_X_sv)
 ```
 
 
@@ -391,15 +390,16 @@ NonLpred$KNN <- predict(knnTune, Chol_te_X_sv)
 ### Create Initial MARS Model
 ```{r}
 # MARS model doesn't need preprocessing, so first rendition will be with Chol_tr_X_imp_fin 
-library(earth)
 set.seed(123)
 mars1 <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y,
                    method = "earth",
                    tuneGrid = expand.grid(degree = 1:3, nprune = 2:38),
                    trControl = Chol_control)
 mars1$finalModel
+mars1$results
+  #used 1 of 32 predictors, 2 of 18 terms (nprune =2) degree=1
+  # RMSE: 35.02993, Rsquared:	0.05354368	
 plot(mars1, main="MARS Initial")
-NonLpred$MARS1 <- predict(mars1, Chol_test_X_imp)
 ```
 
 
@@ -414,8 +414,8 @@ mars2 <- train(x = Chol_tr_X_impfin_sv, y = Chol_train_y,
                    trControl = Chol_control)
 mars2$finalModel
 plot(mars2, main="MARS Secondary")
-NonLpred$MARS2 <- predict(mars2, Chol_te_X_sv)
 # No change between the two MARS models. Drops all but two factors for both.
+  #nprune=2, degree=1, RMSE: 34.80857, Rsquared: 0.05457991
 ```
 
 
@@ -429,17 +429,79 @@ set.seed(100)
 nnet1 <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y,
                   method = "nnet",
                   tuneGrid = nnetGrid,
-                  trControl = ctrl,
+                  trControl = Chol_control,
                   preProc = c("center", "scale"),
                   linout = TRUE,
                   trace = FALSE,
                   MaxNWts = 13 * (ncol(Chol_tr_X_imp_fin) + 1) + 13 + 1,
-                  maxit = 50)
+                  maxit = 100)
 nnet1
-plot(nnet1, main="NNET initial")
+  # size=3, decay=0.1
+  # RMSE: 40.97813, Rsquared: 0.0051328366
+plot(nnet1, main="NNET first")
+```
+```{r}
+set.seed(123)
+# NNET second rendition will be with Chol_tr_X_impfin_sv 
+set.seed(100)
+nnet2 <- train(x = Chol_tr_X_impfin_sv, y = Chol_train_y,
+                  method = "nnet",
+                  tuneGrid = nnetGrid,
+                  trControl = Chol_control,
+                  preProc = c("center", "scale"),
+                  linout = TRUE,
+                  trace = FALSE,
+                  MaxNWts = 13 * (ncol(Chol_tr_X_impfin_sv) + 1) + 13 + 1,
+                  maxit = 100)
+nnet2
+  # size=13, decay=0.1
+  # RMSE: 44.38061, Rsquared: 0.001743654
+plot(nnet2, main="NNET second")
+```
+## Comparing Nonlinear Models:
+### Saving Results
+```{r}
+NonLpred <- data.frame(obs=Chol_test_y)
+NonLpred$svmR <- predict(svmR1, Chol_te_X_sv)
+NonLpred$svmP <- predict(svmP, Chol_te_X_sv)
+NonLpred$KNN <- predict(knnTune, Chol_te_X_sv)
+NonLpred$MARS2 <- predict(mars2, Chol_te_X_sv)
+NonLpred$NNET2 <- predict(nnet2, Chol_te_X_sv)
+plotpred <- data.frame(x=1:921, y1=NonLpred$obs, y2=NonLpred$svmR, 
+                       y3=NonLpred$svmP, y4=NonLpred$KNN, 
+                       y5=NonLpred$MARS2[,"y"], y6=NonLpred$NNET2)
+plot(plotpred$x, plotpred$y1, type = "l", col = 1, 
+     xlab = "prediction #", ylab = "prediction values", 
+     main = "Nonlinear Model Predictions")
+lines(plotpred$x, plotpred$y2, col = 2)
+lines(plotpred$x, plotpred$y3, col = 3)
+lines(plotpred$x, plotpred$y4, col = 4)
+lines(plotpred$x, plotpred$y5, col = 5)
+lines(plotpred$x, plotpred$y6, col = 6)
+legend("bottomleft", cex=0.5, legend = c("Observed", "SVM-Radial",
+                            "SVM-Polynomial", "KNN", "MARS", "NNET"),
+       col = 1:6, lwd = 2)
+```
+### getting RMSE and Plotting
+```{r}
+# RMSE = sqrt(sum((obs-pred)^2)/n), n=921
+getRMSE <- function(x,y) {
+ sqrt(sum((x-y)^2)/length(x))
+}
+nonlin_rmse <- data.frame(c("svmRad", "svmPoly", "KNN",
+                            "MARS", "NNet"))
+nonlin_rmse$RMSE <- c(getRMSE(NonLpred$obs, NonLpred$svmR),
+                      getRMSE(NonLpred$obs, NonLpred$svmP),
+                      getRMSE(NonLpred$obs, NonLpred$KNN),
+                      getRMSE(NonLpred$obs, NonLpred$MARS2),
+                      getRMSE(NonLpred$obs, NonLpred$NNET2))
+colnames(nonlin_rmse)[1]<-"Model Type"
+nonlin_rmse[order(nonlin_rmse$RMSE),]
+  # best non linear model is svm radial with 
+    # sigma = 0.022 and cost=0.25 (RMSE is 32.86)
 ```
 
-# messing around with predictor set
+# messing around with predictor set and log transforming the response
 ```{r}
 expDropC <- c("RIDRETH1_Black", "RIDRETH1_Mex", "RIDRETH1_OHis", 
                "RIDRETH1_Oth", "RIDRETH1_White", "BMXBMI")
@@ -498,7 +560,9 @@ svmR_trial <- train(x=X_trial_train, y = log_Y_train,
                trControl = Chol_control)
 svmR_trial
 # issues in: DMDEDUC2_<9, 
-  # final model uses: 
+  # final model uses: sigma = 0.02019005 and C = 0.25.
+  # RMSE: 0.1531765, Rsquared: 0.021637157
+    # while these are the lowest values, the graph is identical to the non-log adjusted SVM radial model with just different RMSE values. 
 plot(svmR_trial, scales = list(x = list(log = 2)), main="SVM-Radial with X_trial_train and Log Y")
 svmR_trial$finalModel
 trialPred <- data.frame(obs=log_Y_test)
