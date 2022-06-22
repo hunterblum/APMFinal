@@ -1,8 +1,10 @@
 ---
 title: "ADS 503 Project"
-author: "Eva Chow"
-date: '2022-06-08'
-output: html_document
+author: "Hunter Blum, Brianne Bell, Eva Chow"
+date: '2022-06-21'
+output:
+  html_document: default
+  word_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -25,7 +27,7 @@ library(party)
 library(partykit)
 library(rpart.plot)
 library(randomForest)
-library(RWeka) 
+library(RWeka)
 library(gbm)
 library(Cubist)
 
@@ -166,7 +168,7 @@ Chol_corplot <- corrplot(cor(Chol_dummy, use = "complete.obs"), tl.pos = 'n')
 #Looks like some dummy variables that are refusal could be messing up correlations
 Drop_col <- c("DMDBORN4_Ref", "DMDBORN4_DK", "DMDEDUC2_Ref", "DMDEDUC2_DK", "DMDEDUC2_NA", "DMDMARTZ_Ref", "DMDMARTZ_NA", "FIALANG_NA", "MIALANG_NA", "AIALANGA_NA")
 Chol_dummy_2 <- Chol_dummy %>% select(-one_of(Drop_col))
-cor(Chol_dummy_2, use = "complete.obs")
+invisible(cor(Chol_dummy_2, use = "complete.obs")) # using invisible() to reduce extensive output
 corrplot(cor(Chol_dummy_2, use = "complete.obs"), tl.pos = 'n', type = 'lower')
 ```
 ### Smaller plots for easier interpretation.
@@ -184,7 +186,7 @@ socio <- Chol_dummy_2[,c("RIAGENDR_Male","RIAGENDR_Female",
                        "MIALANG_English","MIALANG_Spanish", "AIALANGA_English",
                        "AIALANGA_Spanish", "AIALANGA_Asian", "LBDLDL")]
 
-cor(socio, use = "complete.obs")
+invisible(cor(socio, use = "complete.obs")) # using invisible() to reduce extensive output
 corrplot(cor(socio, use = "complete.obs"), tl.pos = 'y', type = 'lower', 
          order = "hclust", tl.cex = 0.5)
 ```
@@ -193,7 +195,7 @@ corrplot(cor(socio, use = "complete.obs"), tl.pos = 'y', type = 'lower',
 biologic <- Chol_dummy_2[,c("RIDAGEYR", "BMXWT", "BMXHT", "BMXBMI", 
                             "BMXLEG", "BMXARML", "BMXARMC", "BMXWAIST",
                             "BMXHIP", "RIAGENDR_Male", "RIAGENDR_Female","LBDLDL")]
-cor(biologic, use = "complete.obs")
+invisible(cor(biologic, use = "complete.obs")) # using invisible() to reduce extensive output
 corrplot(cor(biologic, use = "complete.obs"), tl.pos = 'y', type = 'lower', 
          order = "hclust", tl.cex = 0.8)
 # correlations between certain biological measures make sense. BMI is derived from the MASS and height of an individual, so it makes sense that many of the BMI measurements correlate with each other. (i.e. hip, waist, and weight measurements correlate with a higher BMI. Being female correlates negatively with leg and arm length as well as height)
@@ -256,7 +258,7 @@ colnames(deg_chol2)
 # Preparing data for modeling
 
 ### Splitting dummy-variable data set and resampling
-```{r}
+```{r message=FALSE, warning=FALSE}
 # set the seed and split the data. We'll do an 80/20 split
 set.seed(123)
 Chol_split <- createDataPartition(Chol$LBDLDL, p=0.80, list=FALSE)
@@ -577,7 +579,7 @@ knnTune$finalModel
 
 ## Multivariate Adaptive Regression Splines (MARS)
 ### Create Initial MARS Model
-```{r}
+```{r warning=FALSE}
 # MARS model doesn't need preprocessing, so first rendition will be with Chol_tr_X_imp_fin 
 set.seed(123)
 mars1 <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y,
@@ -717,13 +719,13 @@ Xtritr_hiC
 Xtritr_hiC <- subset(Xtri_tr_nz, select = c("AIALANGA_English", "DMDBORN4_USA", 
                                             "BMXWT", "FIALANG_English", "BMXWAIST",
                                             "BMXHIP", "DMDEDUC2_NA", "RIAGENDR_Male"))
-cor(Xtritr_hiC)
+invisible(cor(Xtritr_hiC)) # invisible used to reduce extensive output
 corrplot(cor(Xtritr_hiC), order = "hclust", type="lower")
 
 #dropping "BMXHIP", "BMXWAIST", DMDEDUC2_<9 (recurring issues in model attempts)
 drophiC <- c("BMXHIP", "BMXWAIST", "DMDEDUC2_<9")
 X_trial_train <- subset(Xtri_tr_nz, select = !(names(Xtri_tr_nz) %in% drophiC))
-corrplot(cor(X_trial_train), order = "hclust", type="lower")
+corrplot(cor(X_trial_train), order = "hclust", type="lower", tl.cex = 0.7)
 
 ```
 
@@ -892,6 +894,6 @@ ggplot(RMSE_results, aes(x=reorder(Model, -RMSE_results), y=RMSE_results)) + geo
 cubist_plot <- Results %>% select(Observed, Cubist)
 cubist_plot$x <- c(1:921)
 cubist_plot <- cubist_plot %>% gather(key = "Data Source", value = "LDL", -x)
-cubist_plot$alpha <- ifelse(cubist_plot$Observed == "Observed", 0.8, 1)
+# cubist_plot$alpha <- ifelse(cubist_plot$Observed == "Observed", 0.8, 1)
 ggplot(cubist_plot, aes(x = x, y = LDL)) + geom_line(aes(color = `Data Source`, alpha = `Data Source`)) + scale_color_manual(values = c("royalblue1", "royalblue4")) + scale_alpha_manual(values = c(1,.3)) + theme_classic()
 ```
