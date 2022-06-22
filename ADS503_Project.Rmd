@@ -9,8 +9,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-# Libraries
-## REMOVE NOTE LATER - ggplot and dplyr are part of tidyverse, so removed them. 
+### Libraries
 ```{r message=FALSE, warning=FALSE}
 library(haven)
 library(caret)
@@ -21,26 +20,33 @@ library(car)
 library(lattice)
 library(doParallel)
 library(RANN)
+library(rpart)
+library(party)
+library(partykit)
+library(rpart.plot)
+library(randomForest)
+library(RWeka) 
+library(gbm)
+library(Cubist)
 
 library(tidyverse)
 ```
 
-# Set up Parallelization - Note, you can reduce number of clusters if needed not sure if R does it automatically if you set over the number of cores on your CPU
+### Set up Parallelization
 ```{r}
 cl <- makeCluster(6)
 registerDoParallel(cl)
 ```
 
-
-# Read in data
+# Creating Dataset
+### Read in data
 ```{r}
 Demographic <- read_xpt("P_DEMO.XPT")
 BodySize <- read_xpt("P_BMX.XPT")
 Chol_ldl <- read_xpt("P_TRIGLY.XPT")
 ```
 
-# Create Dataset
-Chol-ldl
+### Chol-ldl
 ```{r}
 #Select Variables of interest
 Chol_ldl <- Chol_ldl %>% select(SEQN, LBDLDL)
@@ -48,20 +54,20 @@ Chol_ldl <- Chol_ldl %>% select(SEQN, LBDLDL)
 Chol_ldl <- Chol_ldl %>% drop_na()
 ```
 
-Demographic
+### Demographic
 ```{r}
 #Get rid of variables we don't need
 Drop_col <- c('SDDSRVYR', 'RIDSTATR', 'RIDEXMON', 'SIAPROXY', 'SIAINTRP', 'FIAPROXY', 'FIAINTRP', 'MIAPROXY', 'MIAINTRP', 'WTINTPRP', 'WTMECPRP', 'SDMVPSU', 'SDMVSTRA')
 Demographic <- Demographic %>% select(-one_of(Drop_col))
 ```
 
-BodySize
+### BodySize
 ```{r}
 Drop_col <- c('BMIWT', 'BMIRECUM', 'BMIHEAD', 'BMIHT', 'BMILEG', 'BMIARML', 'BMIARMC', 'BMIWAIST', 'BMIHIP', 'BMDSTATS')
 BodySize <- BodySize %>% select(-one_of(Drop_col))
 ```
 
-Join
+### Join
 ```{r}
 J1 <- Chol_ldl %>% left_join(Demographic, by = "SEQN")
 Chol <- J1 %>% left_join(BodySize, by = "SEQN")
@@ -69,15 +75,17 @@ Chol <- Chol %>% select(!SEQN)
 ```
 
 # Cleaning
+
 ## Changing factors for EDA 
-## Changing Variables to the Correct Type 
+
+### Changing Variables to the Correct Type 
 ```{r}
 Chol_2 <- Chol
 factors <- c("RIAGENDR", "RIDRETH1", "RIDRETH3", "DMDBORN4", "DMDEDUC2", "DMDMARTZ", "RIDEXPRG", "SIALANG", "FIALANG", "MIALANG", "AIALANGA")
 Chol_2[,factors] <- lapply(Chol_2[,factors], factor)
 ```
 
-## Change factor levels to be more interpretable
+### Change factor levels to be more interpretable
 ```{r}
 levels(Chol_2$RIAGENDR) <- c("Male", "Female")
 levels(Chol_2$RIDRETH1) <- c("Mex", "OHis", "White", "Black", "Oth")
@@ -115,7 +123,7 @@ row_na <- row_na %>% arrange(desc(row_na))
 ### Response - LDL Cholesterol
 ```{r}
 #Looks like a fairly normal distribution, maybe a little skewed to the right. 
-ggplot(Chol_2, aes(x = LBDLDL)) + geom_histogram() + ggtitle("LDL Distribution Histogram")
+ggplot(Chol_2, aes(x = LBDLDL)) + geom_histogram() + ggtitle("Distribution of LDL Cholesterol") + xlab("LDL Chol.") + ylab("Count")
 skewness(Chol_2$LBDLDL)
 #skewness value .7886403 confirms very mild skewness to the right
 ```
@@ -161,6 +169,8 @@ Chol_dummy_2 <- Chol_dummy %>% select(-one_of(Drop_col))
 cor(Chol_dummy_2, use = "complete.obs")
 corrplot(cor(Chol_dummy_2, use = "complete.obs"), tl.pos = 'n', type = 'lower')
 ```
+### Smaller plots for easier interpretation.
+
 ```{r}
 # Mini Correlations: Sociological Measures:
 socio <- Chol_dummy_2[,c("RIAGENDR_Male","RIAGENDR_Female",
@@ -189,7 +199,8 @@ corrplot(cor(biologic, use = "complete.obs"), tl.pos = 'y', type = 'lower',
 # correlations between certain biological measures make sense. BMI is derived from the MASS and height of an individual, so it makes sense that many of the BMI measurements correlate with each other. (i.e. hip, waist, and weight measurements correlate with a higher BMI. Being female correlates negatively with leg and arm length as well as height)
 ```
 
-# REMOVE NOTE LATER - MAY NEED TO USE DUMMY CHOL DATA FOR HIGH CORRELATIONS - REGULAR CHOL STILL HAS CATEGORICAL VARIABLES AS SINGLE NUMERIC VARIABLES.
+### Highly-correlated variables in cholesterol
+Note: Highly correlated variables were removed in the model training process - this was just for EDA
 ```{r}
 # let's check for highly correlated predictors
 # we'll do this on our non factor transformed dataset
@@ -203,19 +214,7 @@ high_corr_Chol <- findCorrelation(corr_Chol, cutoff = 0.80)
 no_corr_Chol <- Chol[, -high_corr_Chol]
 dim(no_corr_Chol)
 ```
-# Checking things above with Dummy Variable Data
-## CURRENTLY TESTING STUFF HERE FOR HOW TO DEAL WITH DUMMY DATA WITH COR
-```{r}
-testdata <- Chol_dummy
-testdata <- apply(Chol_dummy, 2, function(y) {y[!is.finite(y)] = NA; y})
-testdata <- testdata[complete.cases(testdata), ]
-testdata <- testdata[, -nearZeroVar(testdata)]
-testdata <- data.frame(testdata)
-dim(Chol_dummy)
-Cor_chol_dummy <- cor(testdata)
-high_corr_dummy <- findCorrelation(Cor_chol_dummy, cutoff = 0.8)
-```
-
+### Looking at a simple ols model to get an idea of important predictors.
 ```{r}
 # looking at a base linear model, to see significant variables 
 model0 <- lm(LBDLDL~., Chol_2)
@@ -230,13 +229,14 @@ summary(model0)
     # BMXWAIST (0.071888)
 ```
 
+Looking at VIF of simple model showed aliased coefficients. Removed them in the model training process. 
 ```{r}
 # looking at VIF for baseline linear:
-vif(model0)
-  # highly/perfectly correlated factors, we might need to drop some
+#vif(model0)
+# highly/perfectly correlated factors, we might need to drop some
 ```
 
-# Degenerate Predictors
+### Degenerate Predictors in the non-dummy dataset
 ```{r}
 # Let's check for degenerate predictors from the original dataset
 nearZeroVar(Chol, saveMetrics = FALSE)
@@ -253,8 +253,9 @@ colnames(deg_chol2)
 
 
 
-# Splitting
-## NOTE SWITCHED TRAINING TO DUMMY
+# Preparing data for modeling
+
+### Splitting dummy-variable data set and resampling
 ```{r}
 # set the seed and split the data. We'll do an 80/20 split
 set.seed(123)
@@ -282,7 +283,7 @@ Chol_folds <- createFolds(y = Chol_train_X, k = 10, returnTrain = T)
 Chol_control <- trainControl(method = "cv", index = Chol_folds)
 ```
 
-## Numeric training data set with just the numeric variables and gender (Just going off a hunch that having too many dummy variables is hurting linear model performance).
+### Numeric training data set with just the numeric variables and gender (Just going off a hunch that having too many dummy variables is hurting linear model performance).
 ```{r}
 Drop_col <- c('RIDRETH1', 'RIDRETH3', 'DMDBORN4', 'DMDEDUC2', 'DMDMARTZ', 'SIALANG', 'FIALANG', 'MIALANG', 'AIALANGA', 'LBDLDL')
 Chol_num <- Chol_2 %>% select(-one_of(Drop_col))
@@ -435,7 +436,7 @@ print(update(plot(Chol_ridge_box), xlab = "Penalty"))
 print(update(plot(Chol_ridge_num), xlab = "Penalty"))
 ```
 
-### Elastic Net - having trouble getting numeric data to run through it
+### Elastic Net 
 ```{r}
 enet_grid <- expand.grid(lambda = c(0, 0.01, 0.1), fraction = seq(0.05, 1, length = 20))
 
@@ -485,3 +486,412 @@ RMSE_results$Model <- rownames(RMSE_results)
 ggplot(RMSE_results, aes(x=reorder(Model, -RMSE_results), y=RMSE_results)) + geom_segment(aes(x=reorder(Model, -RMSE_results), xend = reorder(Model, -RMSE_results), y=30, yend=RMSE_results), color = "cadetblue") + geom_point(color = "darkblue", size = 10) + coord_flip() + ylab("RMSE") + geom_text(aes(label = round(RMSE_results, 2)), color = "white", size = 2.5)
 ```
 
+# Non-Linear Models - Brianne
+## Support Vector Machine (SVM)
+### Create Initial Radial Model
+```{r message=FALSE, warning=FALSE}
+# initial SVM model with radial basis and processed Chol_tr_X_imp_fin and Chol_train_y
+set.seed(123)
+svmR0 <- train(x=Chol_tr_X_imp_fin, y = Chol_train_y,
+               method = "svmRadial",
+               preProcess = c("center", "scale"),
+               tuneLength = 14,
+               trControl = Chol_control)
+svmR0
+  # final model uses: sigma = 0.0207376 and C = 0.25
+  # RMSE: 35.40559, Rsquared: 0.019455264
+plot(svmR0, scales = list(x = list(log = 2)), main="SVM-Radial Initial")
+```
+
+### final radial model
+```{r}
+# svm radial model v2 
+    # issue causing variables in X: MIALANG_Spanish, DMDEDUC2_<9, MIALANG_NA (zero var)
+Chol_tr_X_impfin_drop <- c("MIALANG_Spanish", "DMDEDUC2_<9", "MIALANG_NA")
+Chol_tr_X_impfin_sv <- subset(Chol_tr_X_imp_fin, 
+                              select = !(names(Chol_tr_X_imp_fin) %in% Chol_tr_X_impfin_drop))
+
+#making test X have same columns available
+Chol_te_X_sv <- subset(Chol_test_X_imp, select = c(names(Chol_tr_X_impfin_sv)))
+dim(Chol_tr_X_impfin_sv)
+dim(Chol_te_X_sv)
+
+# sigma grid instead of using tuneLength = 14
+sigmaEst <- kernlab::sigest(as.matrix(Chol_tr_X_impfin_sv[,1:29]))
+Csearch <- 2^seq(-4,+4)
+# sigma estimates using kernlab's sigest function
+svmgrid <- expand.grid(sigma = sigmaEst, C = Csearch)
+
+#model
+set.seed(123)
+svmR1 <- train(x=Chol_tr_X_impfin_sv, y = Chol_train_y,
+               method = "svmRadial",
+               preProcess = c("center", "scale"),
+               tuneGrid = svmgrid,
+               trControl = Chol_control)
+svmR1
+  # final model uses: sigma = 0.03504524 and C = 0.25.
+  # RMSE: 35.30443, Rsquared: 0.020245225 
+plot(svmR1, scales = list(x = list(log = 2)), main="SVM-Radial v2")
+svmR1$finalModel
+```
+
+### Create Polynomial Model
+```{r}
+# going to use the x training set from final svm-radial due to assuming there will be the same problem causing factors of nearZeroVar.
+set.seed(123)
+svmP <- train(x=Chol_tr_X_impfin_sv, y = Chol_train_y,
+               method = "svmPoly",
+               preProcess = c("center", "scale"),
+               tuneGrid = expand.grid(degree = 1:3, 
+                                      scale = c(0.01, 0.005, 0.001, 0.0005), 
+                                      C = Csearch),
+               trControl = Chol_control)
+svmP
+  # final model uses: degree = 2, scale =  0.001,  offset =  1 
+  # sigma = 0.02231109 and C = 2.
+  # RMSE: 35.44929, Rsquared: 0.011746076
+plot(svmP, scales = list(x = list(log = 2),
+                         between=list(x=.5, y=1)), main="SVM-Polynomial")
+svmP$finalModel
+```
+
+
+## K Nearest Neighbors (KNN)
+### Create Initial KNN Model
+```{r}
+# KNN Model needs to have NZV removed so again we are using the x=Chol_tr_X_impfin_sv to train and Chol_te_X_sv to test
+set.seed(123)
+knnTune <- train(x=Chol_tr_X_impfin_sv, y = Chol_train_y,
+               method = "knn",
+               preProcess = c("center", "scale"),
+               tuneGrid = data.frame(k=1:40),
+               trControl = Chol_control)
+knnTune
+  # final model uses: k=40
+  # RMSE: 35.63394, Rsquared: 0.0006650456
+plot(knnTune, main="KNN")
+knnTune$finalModel
+```
+
+
+## Multivariate Adaptive Regression Splines (MARS)
+### Create Initial MARS Model
+```{r}
+# MARS model doesn't need preprocessing, so first rendition will be with Chol_tr_X_imp_fin 
+set.seed(123)
+mars1 <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y,
+                   method = "earth",
+                   tuneGrid = expand.grid(degree = 1:3, nprune = 2:38),
+                   trControl = Chol_control)
+mars1$finalModel
+mars1$results
+  #used 1 of 32 predictors, 2 of 18 terms (nprune =2) degree=1
+  # RMSE: 35.02993, Rsquared:	0.05354368	
+plot(mars1, main="MARS Initial")
+```
+
+
+## Multivariate Adaptive Regression Splines (MARS)
+### Create Secondary MARS Model
+```{r}
+# MARS model using same X sets as SVM models: 
+set.seed(123)
+mars2 <- train(x = Chol_tr_X_impfin_sv, y = Chol_train_y,
+                   method = "earth",
+                   tuneGrid = expand.grid(degree = 1:3, nprune = 2:38),
+                   trControl = Chol_control)
+mars2$finalModel
+plot(mars2, main="MARS Secondary")
+# No change between the two MARS models. Drops all but two factors for both.
+  #nprune=2, degree=1, RMSE: 34.80857, Rsquared: 0.05457991
+```
+
+
+## Neural Network Model (nnet)
+### Create Initial NNET Model
+```{r}
+set.seed(123)
+nnetGrid <- expand.grid(decay = c(0, 0.01, .1), size = c(3, 7, 11, 13))
+# NNET first rendition will be with Chol_tr_X_imp_fin 
+set.seed(100)
+nnet1 <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y,
+                  method = "nnet",
+                  tuneGrid = nnetGrid,
+                  trControl = Chol_control,
+                  preProc = c("center", "scale"),
+                  linout = TRUE,
+                  trace = FALSE,
+                  MaxNWts = 13 * (ncol(Chol_tr_X_imp_fin) + 1) + 13 + 1,
+                  maxit = 100)
+nnet1
+  # size=3, decay=0.1
+  # RMSE: 40.97813, Rsquared: 0.0051328366
+plot(nnet1, main="NNET first")
+```
+```{r}
+set.seed(123)
+# NNET second rendition will be with Chol_tr_X_impfin_sv 
+set.seed(100)
+nnet2 <- train(x = Chol_tr_X_impfin_sv, y = Chol_train_y,
+                  method = "nnet",
+                  tuneGrid = nnetGrid,
+                  trControl = Chol_control,
+                  preProc = c("center", "scale"),
+                  linout = TRUE,
+                  trace = FALSE,
+                  MaxNWts = 13 * (ncol(Chol_tr_X_impfin_sv) + 1) + 13 + 1,
+                  maxit = 100)
+nnet2
+  # size=13, decay=0.1
+  # RMSE: 44.38061, Rsquared: 0.001743654
+plot(nnet2, main="NNET second")
+```
+## Comparing Nonlinear Models:
+### Saving Results
+```{r}
+NonLpred <- data.frame(obs=Chol_test_y)
+NonLpred$svmR <- predict(svmR1, Chol_te_X_sv)
+NonLpred$svmP <- predict(svmP, Chol_te_X_sv)
+NonLpred$KNN <- predict(knnTune, Chol_te_X_sv)
+NonLpred$MARS2 <- predict(mars2, Chol_te_X_sv)
+NonLpred$NNET2 <- predict(nnet2, Chol_te_X_sv)
+plotpred <- data.frame(x=1:921, y1=NonLpred$obs, y2=NonLpred$svmR, 
+                       y3=NonLpred$svmP, y4=NonLpred$KNN, 
+                       y5=NonLpred$MARS2[,"y"], y6=NonLpred$NNET2)
+plot(plotpred$x, plotpred$y1, type = "l", col = 1, 
+     xlab = "prediction #", ylab = "prediction values", 
+     main = "Nonlinear Model Predictions")
+lines(plotpred$x, plotpred$y2, col = 2)
+lines(plotpred$x, plotpred$y3, col = 3)
+lines(plotpred$x, plotpred$y4, col = 4)
+lines(plotpred$x, plotpred$y5, col = 5)
+lines(plotpred$x, plotpred$y6, col = 6)
+legend("bottomleft", cex=0.5, legend = c("Observed", "SVM-Radial",
+                            "SVM-Polynomial", "KNN", "MARS", "NNET"),
+       col = 1:6, lwd = 2)
+```
+### Getting RMSE and Plotting
+```{r}
+# RMSE = sqrt(sum((obs-pred)^2)/n), n=921
+getRMSE <- function(x,y) {
+ sqrt(sum((x-y)^2)/length(x))
+}
+nonlin_rmse <- data.frame(c("svmRad", "svmPoly", "KNN",
+                            "MARS", "NNet"))
+nonlin_rmse$RMSE <- c(getRMSE(NonLpred$obs, NonLpred$svmR),
+                      getRMSE(NonLpred$obs, NonLpred$svmP),
+                      getRMSE(NonLpred$obs, NonLpred$KNN),
+                      getRMSE(NonLpred$obs, NonLpred$MARS2),
+                      getRMSE(NonLpred$obs, NonLpred$NNET2))
+colnames(nonlin_rmse)[1]<-"Model Type"
+nonlin_rmse[order(nonlin_rmse$RMSE),]
+  # best non linear model is svm radial with 
+    # sigma = sigma = 0.03504524 and C = 0.25. (RMSE is 32.95)
+```
+
+### Messing around with predictor set and log transforming the response
+```{r}
+expDropC <- c("RIDRETH1_Black", "RIDRETH1_Mex", "RIDRETH1_OHis", 
+               "RIDRETH1_Oth", "RIDRETH1_White", "BMXBMI")
+Xtrial_tr <- subset(Chol_train_X_imp, select = !(names(Chol_train_X_imp) %in% expDropC))
+# looking for near zero var:
+Xtri_nzv <- nearZeroVar(Xtrial_tr)
+  # "DMDBORN4_Ref", "DMDBORN4_DK", "DMDEDUC2_Ref", "DMDEDUC2_DK", "DMDMARTZ_Ref",
+    # "DMDMARTZ_DK", "AIALANGA_Asian"
+Xtri_tr_nz <- subset(Xtrial_tr, select = -c(Xtri_nzv))
+print(paste("Xtrial_tr ncol: ", ncol(Xtrial_tr), " NZV removed, new ncol: ", ncol(Xtri_tr_nz)))
+
+# dropping SIALANG groups (sample person interview instrument lang)
+expDropC <- c("SIALANG_English", "SIALANG_Spanish", 
+              "MIALANG_English", "MIALANG_Spanish", "MIALANG_NA")
+Xtri_tr_nz <- subset(Xtri_tr_nz, select = !(names(Xtri_tr_nz) %in% expDropC))
+print(paste("Xtrial_tr ncol: ", ncol(Xtrial_tr), " NZV removed, new ncol: ", ncol(Xtri_tr_nz)))
+
+#looking for high corr:
+Xtritr_hiC <- findCorrelation(cor(Xtri_tr_nz), cutoff = 0.8)
+Xtritr_hiC
+  # "AIALANGA_English", "DMDBORN4_USA", "BMXWT", "FIALANG_English", 
+  # "BMXWAIST", "BMXHIP", "DMDEDUC2_NA", "RIAGENDR_Male"
+
+Xtritr_hiC <- subset(Xtri_tr_nz, select = c("AIALANGA_English", "DMDBORN4_USA", 
+                                            "BMXWT", "FIALANG_English", "BMXWAIST",
+                                            "BMXHIP", "DMDEDUC2_NA", "RIAGENDR_Male"))
+cor(Xtritr_hiC)
+corrplot(cor(Xtritr_hiC), order = "hclust", type="lower")
+
+#dropping "BMXHIP", "BMXWAIST", DMDEDUC2_<9 (recurring issues in model attempts)
+drophiC <- c("BMXHIP", "BMXWAIST", "DMDEDUC2_<9")
+X_trial_train <- subset(Xtri_tr_nz, select = !(names(Xtri_tr_nz) %in% drophiC))
+corrplot(cor(X_trial_train), order = "hclust", type="lower")
+
+```
+
+### Making test and train columns match
+```{r}
+keepsies <- colnames(X_trial_train)
+X_trial_test <- subset(Chol_test_X_imp, select = c(keepsies))
+```
+
+### Radial SVM with the matched data and log adjusted y
+```{r}
+#svm radial with X_trial_train and log adjusted y
+log_Y_train <- log10(Chol_train_y)
+hist(log_Y_train)
+log_Y_test <- log10(Chol_test_y)
+
+#model
+set.seed(123)
+svmR_trial <- train(x=X_trial_train, y = log_Y_train,
+               method = "svmRadial",
+               preProcess = c("center", "scale"),
+               tuneLength = 14,
+               trControl = Chol_control)
+svmR_trial
+# issues in: DMDEDUC2_<9, 
+  # final model uses: sigma = 0.02019005 and C = 0.25.
+  # RMSE: 0.1531765, Rsquared: 0.021637157
+    # while these are the lowest values, the graph is identical to the non-log adjusted SVM radial model with just different RMSE values. 
+plot(svmR_trial, scales = list(x = list(log = 2)), main="SVM-Radial with X_trial_train and Log Y")
+svmR_trial$finalModel
+trialPred <- data.frame(obs=log_Y_test)
+trialPred$svmRad <- predict(svmR_trial, X_trial_test)
+```
+
+# Regression Trees - Eva
+## Single Regression Trees
+### Tree with CART based splits (rpart) and optimization with default parameters
+```{r message=FALSE, warning=FALSE}
+set.seed(123)
+# let's see how it splits the training data
+Chol_rpart <- rpart(Chol_train_y ~., data = Chol_tr_X_imp_fin, cp = 0.003)
+
+summary(Chol_rpart)
+rpart.plot(Chol_rpart)
+
+# tune and predict
+Chol_rpart_tune <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "rpart", cp = 0.003)
+Chol_rpart_pred <- predict(Chol_rpart_tune, Chol_test_X_imp)
+postResample(pred = Chol_rpart_pred, obs = Chol_test_y)
+# Rsquared value of 0.066 isn't too great. RMSE of 33.0. Let's compare to other trees
+```
+### Tree with CART based splits (rpart2 to tune over max depth)
+```{r}
+set.seed(123)
+Chol_rpart2_tune <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "rpart2", cp = 0.003)
+Chol_rpart2_pred <- predict(Chol_rpart2_tune, Chol_test_X_imp)
+postResample(pred = Chol_rpart2_pred, obs = Chol_test_y)
+# minor improvement? Rsquared value of 0.071 and RMSE of 32.9
+```
+
+
+## Bagged Trees
+```{r}
+set.seed(123)
+Chol_bagtree <- train(x=Chol_tr_X_imp_fin, y = Chol_train_y, method = "treebag", nbagg = 70, trControl = Chol_control)
+Chol_bagtree
+# Rsquared value of 0.033. RMSE is 35.3. Still not fantastic
+```
+
+## Random Forest
+```{r}
+set.seed(123)
+
+rfmtryValues <- seq(1,10,1)
+
+Chol_rf <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "rf", ntree = 300, tuneGrid = data.frame(mtry=rfmtryValues), trControl=Chol_control) # 300 trees provides the highest Rsquared value when checking with test data
+Chol_rf
+plot(Chol_rf)
+
+Chol_rf_pred <- predict(Chol_rf, Chol_test_X_imp)
+postResample(pred = Chol_rf_pred, obs = Chol_test_y)
+# Rsquared value of 0.077. RMSE of 33.1
+```
+
+## Boosted Trees
+```{r}
+# some control parameters
+gbmGrid <- expand.grid(interaction.depth = c(1,3,5,7,9), n.trees=300, shrinkage = c(0.01, 0.1), n.minobsinnode=5)
+
+set.seed(123)
+Chol_gbm <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "gbm", tuneGrid = gbmGrid, verbose = FALSE, trControl = Chol_control)
+Chol_gbm
+
+Chol_gbm_pred <- predict(Chol_gbm, Chol_test_X_imp)
+postResample(pred = Chol_gbm_pred, obs = Chol_test_y)
+# RMSE 32.9 and Rsquared 0.081
+```
+
+## Model Trees
+### Model Trees (M5)
+```{r message=FALSE, warning=FALSE}
+# decision tree with linear regression at terminal nodes to predict continuous variables
+set.seed(123)
+Chol_M5 <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "M5", trControl = Chol_control, control = Weka_control(M=10))
+
+plot(Chol_M5)
+
+Chol_M5_pred <- predict(Chol_M5, Chol_test_X_imp)
+postResample(pred = Chol_M5_pred, obs = Chol_test_y)
+# Rsquared value of 0.076 and RMSE of 33.6
+```
+
+### Model Tree (Rule Based M5)
+```{r message=FALSE, warning=FALSE}
+# decision tree with linear regression at terminal nodes to predict continuous variables
+set.seed(123)
+Chol_M5rules <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "M5Rules", trControl = Chol_control, control = Weka_control(M=10))
+
+plot(Chol_M5rules)
+
+Chol_M5rules_pred <- predict(Chol_M5rules, Chol_test_X_imp)
+postResample(pred = Chol_M5rules_pred, obs = Chol_test_y)
+# Slight improvement, Rsquared value of 0.087 and RMSE of 32.8
+```
+
+## Cubist
+```{r}
+set.seed(123)
+Chol_cube <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "cubist", trControl = Chol_control)
+
+plot(Chol_cube)
+
+Chol_cube_pred <- predict(Chol_cube, Chol_test_X_imp)
+postResample(pred = Chol_cube_pred, obs = Chol_test_y)
+# "Best performing" so far, but ever so slightly over the other models. Rsquared of 0.092 and RMSE of 32.6
+```
+
+# Results
+
+### Create Data set with all of the models
+```{r}
+NonLpred <- NonLpred %>% select(!obs)
+Trees <- cbind.data.frame(Cubist = Chol_cube_pred, GBM = Chol_gbm_pred, M5 = Chol_M5_pred, M5Rules = Chol_M5rules_pred, RF = Chol_rf_pred, CART = Chol_rpart2_pred)
+
+Results <- cbind(Linear_res, NonLpred, Trees)
+```
+
+### Get RMSE and Plot
+```{r}
+find_rmse <- function(x){
+  caret::RMSE(x, Results[,"Observed"])
+}
+
+RMSE_results <- apply(X = Results[,2:22], FUN = find_rmse, MARGIN = 2)
+RMSE_results <- data.frame(RMSE_results)
+RMSE_results$Model <- rownames(RMSE_results)
+RMSE_results$Model_Type <- "Linear"
+RMSE_results$Model_Type[11:15] <- "Non-Linear"
+RMSE_results$Model_Type[16:21] <- "Tree"
+
+ggplot(RMSE_results, aes(x=reorder(Model, -RMSE_results), y=RMSE_results)) + geom_segment(aes(x=reorder(Model, -RMSE_results), xend = reorder(Model, -RMSE_results), y=30, yend=RMSE_results, color = Model_Type)) + geom_point(aes(color=Model_Type), size = 9) + coord_flip() + ylab("RMSE") + geom_text(aes(label = round(RMSE_results, 2)), color = "black", size = 2.5) + labs(color = "Model Type") + xlab("Model") 
+```
+
+### Plot best model (cubist) against the original data
+```{r}
+cubist_plot <- Results %>% select(Observed, Cubist)
+cubist_plot$x <- c(1:921)
+cubist_plot <- cubist_plot %>% gather(key = "Data Source", value = "LDL", -x)
+cubist_plot$alpha <- ifelse(cubist_plot$Observed == "Observed", 0.8, 1)
+ggplot(cubist_plot, aes(x = x, y = LDL)) + geom_line(aes(color = `Data Source`, alpha = `Data Source`)) + scale_color_manual(values = c("royalblue1", "royalblue4")) + scale_alpha_manual(values = c(1,.3)) + theme_classic()
+```
