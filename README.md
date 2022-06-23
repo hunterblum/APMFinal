@@ -7,7 +7,7 @@
 -- Project Status: [Completed]
 
 # Installation
-You should add an instruction how this project to be used, installed, run, edited in others’ machine.
+Code files can be run in R Studio. There is a Java or R or Windows conflict with RWeka library which makes RWeka code not runnable in all instances, check to see if it runs (if it will not, it restarts R). The models developed are not currently recommended for use outside of classroom modeling practice/understanding.
 
 # Project Intro/Objective
 The main purpose of this project is to explore different modeling methods to develop the best model for predicting LDL levels from demographic and biological measures. By developing this model, patients could avoid being unnecessarily poked to have their blood drawn to check LDL cholesterol levels. This would alleviate costs to the clinic, laboratory, insurance, and patient. This would also alleviate patient nerves by reducing time around needles to only when necessary (i.e. a high or concerning LDL level is predicted). 
