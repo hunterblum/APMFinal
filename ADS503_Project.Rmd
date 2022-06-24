@@ -886,7 +886,7 @@ RMSE_results$Model_Type <- "Linear"
 RMSE_results$Model_Type[11:15] <- "Non-Linear"
 RMSE_results$Model_Type[16:21] <- "Tree"
 
-ggplot(RMSE_results, aes(x=reorder(Model, -RMSE_results), y=RMSE_results)) + geom_segment(aes(x=reorder(Model, -RMSE_results), xend = reorder(Model, -RMSE_results), y=30, yend=RMSE_results, color = Model_Type)) + geom_point(aes(color=Model_Type), size = 9) + coord_flip() + ylab("RMSE") + geom_text(aes(label = round(RMSE_results, 2)), color = "black", size = 2.5) + labs(color = "Model Type") + xlab("Model") 
+ggplot(RMSE_results, aes(x=reorder(Model, -RMSE_results), y=RMSE_results)) + geom_segment(aes(x=reorder(Model, -RMSE_results), xend = reorder(Model, -RMSE_results), y=30, yend=RMSE_results, color = Model_Type)) + geom_point(aes(color=Model_Type), size = 9) + coord_flip() + ylab("RMSE") + geom_text(aes(label = round(RMSE_results, 2)), color = "black", size = 2.5, fontface = "bold") + labs(color = "Model Type") + xlab("Model") 
 ```
 
 ### Plot best model (cubist) against the original data
