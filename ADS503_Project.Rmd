@@ -780,7 +780,7 @@ postResample(pred = Chol_rpart_pred, obs = Chol_test_y)
 ### Tree with CART based splits (rpart2 to tune over max depth)
 ```{r}
 set.seed(123)
-Chol_rpart2_tune <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "rpart2", maxdepth = 5)
+Chol_rpart2_tune <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "rpart2", maxdepth = 6)
 Chol_rpart2_pred <- predict(Chol_rpart2_tune, Chol_test_X_imp)
 postResample(pred = Chol_rpart2_pred, obs = Chol_test_y)
 # minor improvement? Rsquared value of 0.071 and RMSE of 32.9
@@ -790,7 +790,7 @@ postResample(pred = Chol_rpart2_pred, obs = Chol_test_y)
 ## Bagged Trees
 ```{r}
 set.seed(123)
-Chol_bagtree <- train(x=Chol_tr_X_imp_fin, y = Chol_train_y, method = "treebag", nbagg = 70, trControl = Chol_control)
+Chol_bagtree <- train(x=Chol_tr_X_imp_fin, y = Chol_train_y, method = "treebag", nbagg = 70, cp = 0.003, trControl = Chol_control)
 Chol_bagtree
 # Rsquared value of 0.033. RMSE is 35.3. Still not fantastic
 ```
