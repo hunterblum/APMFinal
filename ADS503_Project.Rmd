@@ -123,7 +123,7 @@ row_na <- row_na %>% arrange(desc(row_na))
 
 ## Distributions
 ### Response - LDL Cholesterol
-```{r}
+```{r message=FALSE, warning=FALSE}
 #Looks like a fairly normal distribution, maybe a little skewed to the right. 
 ggplot(Chol_2, aes(x = LBDLDL)) + geom_histogram() + ggtitle("Distribution of LDL Cholesterol") + xlab("LDL Chol.") + ylab("Count")
 skewness(Chol_2$LBDLDL)
@@ -159,7 +159,7 @@ grid.arrange(grobs = Body_hist, top = "Body Measures")
 
 ## Correlations
 Heatmap
-```{r}
+```{r message=FALSE, warning=FALSE}
 Chol_dummy <- fastDummies::dummy_cols(Chol_2)
 Chol_dummy <- Chol_dummy %>% select_if(~!is.factor(.))
 Chol_dummy[] <- lapply(Chol_dummy, as.numeric)
@@ -220,7 +220,7 @@ dim(no_corr_Chol)
 ```{r}
 # looking at a base linear model, to see significant variables 
 model0 <- lm(LBDLDL~., Chol_2)
-summary(model0)
+invisible(summary(model0)) # invisible() used to reduce output. Key observations will be noted below:
   # significant contributors: variable (Pr(>|t|)) 
     # RIDAGEYR (0.000132)
     # (Intercept) (0.043474)
@@ -234,7 +234,7 @@ summary(model0)
 Looking at VIF of simple model showed aliased coefficients. Removed them in the model training process. 
 ```{r}
 # looking at VIF for baseline linear:
-#vif(model0)
+# vif(model0)
 # highly/perfectly correlated factors, we might need to drop some
 ```
 
@@ -252,7 +252,6 @@ colnames(deg_chol2)
 
 # we may have to consider removing depending on the data used for modeling
 ```
-
 
 
 # Preparing data for modeling
@@ -286,7 +285,7 @@ Chol_control <- trainControl(method = "cv", index = Chol_folds)
 ```
 
 ### Numeric training data set with just the numeric variables and gender (Just going off a hunch that having too many dummy variables is hurting linear model performance).
-```{r}
+```{r message=FALSE, warning=FALSE}
 Drop_col <- c('RIDRETH1', 'RIDRETH3', 'DMDBORN4', 'DMDEDUC2', 'DMDMARTZ', 'SIALANG', 'FIALANG', 'MIALANG', 'AIALANGA', 'LBDLDL')
 Chol_num <- Chol_2 %>% select(-one_of(Drop_col))
 Chol_dummy <- fastDummies::dummy_cols(Chol_num)
@@ -311,12 +310,12 @@ Chol_control_num <- trainControl(method = "cv", index = Chol_folds_num)
 # Linear Models - Hunter
 ## OLS 
 ### Create Initial Model
-```{r}
+```{r message=FALSE, warning=FALSE}
 Chol_ols_tune <- train(x = Chol_train_X_imp, y = Chol_train_y, method = "lm", trControl = Chol_control)
 plot(Chol_ols_tune$finalModel)
 ```
 ### FIX TRAINING SET
-```{r}
+```{r message=FALSE, warning=FALSE}
 # VIF shows aliased coefficients, need to get rid of those by removing high cor predictors
 test <- cor(Chol_train_X_imp)
 # Also have an issue with DMDEDUC2_DK all being zero so get rid of high var predictors
@@ -325,10 +324,10 @@ Chol_tr_X_imp_fin <- Chol_tr_x_imp_vr[, -findCorrelation(cor(Chol_tr_x_imp_vr), 
 ```
 
 ### Tune Another Model
-```{r}
+```{r message=FALSE, warning=FALSE}
 Chol_ols_tune2 <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "lm", trControl = Chol_control)
 plot(Chol_ols_tune2$finalModel)
-summary(Chol_ols_tune2$finalModel)
+invisible(summary(Chol_ols_tune2$finalModel)) # invisible used to minimize output clutter. Key observations to be noted in final report
 ```
 
 ### Tune model with BoxCox to see if it will help normality issues - Didn't do much, we'll just stick with the non-transformed data. Also tried transformin LDL, didn't work either.
@@ -338,14 +337,14 @@ Chol_tr_boxcox <- predict(Chol_bct, Chol_tr_X_imp_fin)
 
 Chol_ols_tune3 <- train(x = Chol_tr_boxcox, y = Chol_train_y, method = "lm", trControl = Chol_control)
 plot(Chol_ols_tune3$finalModel)
-summary(Chol_ols_tune3$finalModel)
+invisible(summary(Chol_ols_tune3$finalModel)) #invisible used to reduce cluttered output. Key observations noted in final report
 ```
 
 ### Try reduced data - Didn't really help our diagnostic plot, so we'll go with the regular dummy data
 ```{r}
 Chol_ols_tune_num <- train(x = Chol_num_tr_X, y = Chol_train_y, method = "lm", trControl = Chol_control_num)
 plot(Chol_ols_tune_num$finalModel)
-summary(Chol_ols_tune_num$finalModel)
+invisible(summary(Chol_ols_tune_num$finalModel)) # hiding long output to reduce clutter. Key observations to be noted in final report
 ```
 
 ### Final OLS Model
@@ -353,7 +352,7 @@ summary(Chol_ols_tune_num$finalModel)
 Chol_sig_tr <- Chol_tr_X_imp_fin %>% select(RIDAGEYR, BMXHT, BMXBMI, BMXLEG, BMXARMC,  DMDBORN4_Oth, DMDEDUC2_NA, MIALANG_NA, AIALANGA_NA)
 Chol_ols <- train(x = Chol_sig_tr, y = Chol_train_y, method = "lm", trControl = Chol_control)
 plot(Chol_ols$finalModel)
-summary(Chol_ols$finalModel)
+invisible(summary(Chol_ols$finalModel)) # hidden to reduce output clutter. Key observations to be noted
 
 #Predict on test data
 Chol_ols_res <- predict(Chol_ols, Chol_test_X)
@@ -364,15 +363,15 @@ Chol_ols_res <- predict(Chol_ols, Chol_test_X)
 ```{r}
 set.seed(123)
 Chol_pcr <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "pcr", tuneGrid = expand.grid(ncomp=1:32), trControl = Chol_control)
-Chol_pcr
+invisible(Chol_pcr) # output hidden in final report to reduce clutter
 
 set.seed(123)
 Chol_pcr_box <- train(x = Chol_tr_boxcox, y = Chol_train_y, method = "pcr", tuneGrid = expand.grid(ncomp=1:32), trControl = Chol_control)
-Chol_pcr_box
+invisible(Chol_pcr_box) # output hidden in final report to reduce clutter
 
 set.seed(123)
 Chol_pcr_num <- train(x = Chol_num_tr_X, y = Chol_train_y, method = "pcr", tuneGrid = expand.grid(ncomp=1:8), trControl = Chol_control_num)
-Chol_pcr_num
+invisible(Chol_pcr_num) # output hidden in final report to reduce clutter
 
 pcr_resamp <- Chol_pcr$results
 pcr_resamp$Model <- "PCR"
@@ -382,21 +381,22 @@ box_pcr_resamp$Model <- "BPCR"
 
 num_pcr_resamp <- Chol_pcr_num$results
 num_pcr_resamp$Model <- "PCR"
+# key observations and summary to be noted in final report
 ```
 
 ### PLS
 ```{r}
 set.seed(123)
 Chol_pls <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "pls", tuneGrid = expand.grid(ncomp = 1:32), trControl = Chol_control)
-Chol_pls
+invisible(Chol_pls) # output hidden to reduce clutter
 
 set.seed(123)
 Chol_pls_box <- train(x = Chol_tr_boxcox, y = Chol_train_y, method = "pls", tuneGrid = expand.grid(ncomp = 1:32), trControl = Chol_control)
-Chol_pls_box
+invisible(Chol_pls_box) # output hidden to reduce clutter
 
 set.seed(123)
 Chol_pls_num <- train(x = Chol_num_tr_X, y = Chol_train_y, method = "pls", tuneGrid = expand.grid(ncomp = 1:8), trControl = Chol_control_num)
-Chol_pls_num
+invisible(Chol_pls_num) # output hidden to reduce clutter
 
 pls_resamp <- Chol_pls$results
 pls_resamp$Model <- "PLS"
@@ -420,18 +420,18 @@ xyplot(RMSE ~ ncomp, data = plot2_data, xlab = "# of Components", ylab = "RMSE (
 
 ## Penalized Models
 ### Ridge
-```{r}
+```{r message=FALSE, warning=FALSE}
 set.seed(123)
 Chol_ridge <- train(x = Chol_tr_X_imp_fin, y= Chol_train_y, method = "ridge", tuneGrid = expand.grid(lambda = seq(0, .1, length = 15)), trControl = Chol_control)
-Chol_ridge
+invisible(Chol_ridge) # model output hidden to reduce clutter
 
 set.seed(123)
 Chol_ridge_box <- train(x = Chol_tr_boxcox, y= Chol_train_y, method = "ridge", tuneGrid = expand.grid(lambda = seq(0, .5, length = 15)), trControl = Chol_control)
-Chol_ridge_box
+invisible(Chol_ridge_box) # model output hidden to reduce clutter
 
 set.seed(123)
 Chol_ridge_num <- train(x = Chol_num_tr_X, y= Chol_train_y, method = "ridge", tuneGrid = expand.grid(lambda = seq(0, .5, length = 15)), trControl = Chol_control_num)
-Chol_ridge_num
+invisible(Chol_ridge_num) # model output hidden to reduce clutter
 
 print(update(plot(Chol_ridge), xlab = "Penalty"))
 print(update(plot(Chol_ridge_box), xlab = "Penalty"))
@@ -439,14 +439,14 @@ print(update(plot(Chol_ridge_num), xlab = "Penalty"))
 ```
 
 ### Elastic Net 
-```{r}
+```{r message=FALSE, warning=FALSE}
 enet_grid <- expand.grid(lambda = c(0, 0.01, 0.1), fraction = seq(0.05, 1, length = 20))
 
 Chol_enet <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "enet", tuneGrid = enet_grid, trControl = Chol_control)
-Chol_enet
+invisible(Chol_enet) # model output hidden to reduce clutter
 
 Chol_enet_box <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "enet", tuneGrid = enet_grid, trControl = Chol_control)
-Chol_enet_box
+invisible(Chol_enet_box) # model output hidden to reduce clutter
 
 Chol_enet_num <- train(x = Chol_num_tr_X, y = Chol_train_y, method = "enet", tuneGrid = enet_grid, trControl = Chol_control_num)
 
@@ -459,7 +459,7 @@ plot(Chol_enet_num)
 Note: No diagnostic plot showed much of a difference between boxcox vs. regular (not suprising given normality in histograms), so we'll just use the regular constructed models
 
 ### Create Data set of predictions and observed
-```{r}
+```{r message=FALSE, warning=FALSE}
 Res_OLS <- predict(Chol_ols, Chol_test_X_imp)
 Res_OLS_num <- predict(Chol_ols_tune_num, Chol_num_test_X)
 Res_PLS <- predict(Chol_pls, Chol_test_X_imp)
@@ -499,14 +499,14 @@ svmR0 <- train(x=Chol_tr_X_imp_fin, y = Chol_train_y,
                preProcess = c("center", "scale"),
                tuneLength = 14,
                trControl = Chol_control)
-svmR0
+invisible(svmR0) # model output hidden to reduce clutter. Key observations noted below:
   # final model uses: sigma = 0.0207376 and C = 0.25
   # RMSE: 35.40559, Rsquared: 0.019455264
 plot(svmR0, scales = list(x = list(log = 2)), main="SVM-Radial Initial")
 ```
 
 ### final radial model
-```{r}
+```{r message=FALSE, warning=FALSE}
 # svm radial model v2 
     # issue causing variables in X: MIALANG_Spanish, DMDEDUC2_<9, MIALANG_NA (zero var)
 Chol_tr_X_impfin_drop <- c("MIALANG_Spanish", "DMDEDUC2_<9", "MIALANG_NA")
@@ -531,7 +531,7 @@ svmR1 <- train(x=Chol_tr_X_impfin_sv, y = Chol_train_y,
                preProcess = c("center", "scale"),
                tuneGrid = svmgrid,
                trControl = Chol_control)
-svmR1
+invisible(svmR1) # model output hidden to reduce clutter. Key observations noted below:
   # final model uses: sigma = 0.03504524 and C = 0.25.
   # RMSE: 35.30443, Rsquared: 0.020245225 
 plot(svmR1, scales = list(x = list(log = 2)), main="SVM-Radial v2")
@@ -539,7 +539,7 @@ svmR1$finalModel
 ```
 
 ### Create Polynomial Model
-```{r}
+```{r message=FALSE, warning=FALSE}
 # going to use the x training set from final svm-radial due to assuming there will be the same problem causing factors of nearZeroVar.
 set.seed(123)
 svmP <- train(x=Chol_tr_X_impfin_sv, y = Chol_train_y,
@@ -549,7 +549,7 @@ svmP <- train(x=Chol_tr_X_impfin_sv, y = Chol_train_y,
                                       scale = c(0.01, 0.005, 0.001, 0.0005), 
                                       C = Csearch),
                trControl = Chol_control)
-svmP
+invisible(svmP) # model output hidden to reduce clutter. Key observations noted below:
   # final model uses: degree = 2, scale =  0.001,  offset =  1 
   # sigma = 0.02231109 and C = 2.
   # RMSE: 35.44929, Rsquared: 0.011746076
@@ -569,7 +569,7 @@ knnTune <- train(x=Chol_tr_X_impfin_sv, y = Chol_train_y,
                preProcess = c("center", "scale"),
                tuneGrid = data.frame(k=1:40),
                trControl = Chol_control)
-knnTune
+invisible(knnTune) # model output hidden to reduce clutter. Key observations noted below:
   # final model uses: k=40
   # RMSE: 35.63394, Rsquared: 0.0006650456
 plot(knnTune, main="KNN")
@@ -587,7 +587,7 @@ mars1 <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y,
                    tuneGrid = expand.grid(degree = 1:3, nprune = 2:38),
                    trControl = Chol_control)
 mars1$finalModel
-mars1$results
+invisible(mars1$results) # model results hidden to reduce clutter. Key observations noted below:
   #used 1 of 32 predictors, 2 of 18 terms (nprune =2) degree=1
   # RMSE: 35.02993, Rsquared:	0.05354368	
 plot(mars1, main="MARS Initial")
@@ -596,7 +596,7 @@ plot(mars1, main="MARS Initial")
 
 ## Multivariate Adaptive Regression Splines (MARS)
 ### Create Secondary MARS Model
-```{r}
+```{r message=FALSE, warning=FALSE}
 # MARS model using same X sets as SVM models: 
 set.seed(123)
 mars2 <- train(x = Chol_tr_X_impfin_sv, y = Chol_train_y,
@@ -626,7 +626,7 @@ nnet1 <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y,
                   trace = FALSE,
                   MaxNWts = 13 * (ncol(Chol_tr_X_imp_fin) + 1) + 13 + 1,
                   maxit = 100)
-nnet1
+invisible(nnet1) # model output hidden to reduce clutter. Key observations noted below:
   # size=3, decay=0.1
   # RMSE: 40.97813, Rsquared: 0.0051328366
 plot(nnet1, main="NNET first")
@@ -644,7 +644,7 @@ nnet2 <- train(x = Chol_tr_X_impfin_sv, y = Chol_train_y,
                   trace = FALSE,
                   MaxNWts = 13 * (ncol(Chol_tr_X_impfin_sv) + 1) + 13 + 1,
                   maxit = 100)
-nnet2
+invisible(nnet2) # model output hidden to reduce clutter. Key observations noted below:
   # size=13, decay=0.1
   # RMSE: 44.38061, Rsquared: 0.001743654
 plot(nnet2, main="NNET second")
@@ -749,7 +749,7 @@ svmR_trial <- train(x=X_trial_train, y = log_Y_train,
                preProcess = c("center", "scale"),
                tuneLength = 14,
                trControl = Chol_control)
-svmR_trial
+invisible(svmR_trial) # output hidden to reduce clutter. Key observations noted below:
 # issues in: DMDEDUC2_<9, 
   # final model uses: sigma = 0.02019005 and C = 0.25.
   # RMSE: 0.1531765, Rsquared: 0.021637157
@@ -768,7 +768,8 @@ set.seed(123)
 # let's see how it splits the training data
 Chol_rpart <- rpart(Chol_train_y ~., data = Chol_tr_X_imp_fin, cp = 0.003)
 
-summary(Chol_rpart)
+invisible(summary(Chol_rpart)) # output hidden to reduce clutter. Key observations noted below:
+# 127 nodes. means and MSE of the terminal nodes vary widely
 rpart.plot(Chol_rpart)
 
 # tune and predict
@@ -802,7 +803,7 @@ set.seed(123)
 rfmtryValues <- seq(1,10,1)
 
 Chol_rf <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "rf", ntree = 300, tuneGrid = data.frame(mtry=rfmtryValues), trControl=Chol_control) # 300 trees provides the highest Rsquared value when checking with test data
-Chol_rf
+invisible(Chol_rf) # output hidden to reduce clutter
 plot(Chol_rf)
 
 Chol_rf_pred <- predict(Chol_rf, Chol_test_X_imp)
@@ -817,7 +818,8 @@ gbmGrid <- expand.grid(interaction.depth = c(1,3,5,7,9), n.trees=300, shrinkage 
 
 set.seed(123)
 Chol_gbm <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "gbm", tuneGrid = gbmGrid, verbose = FALSE, trControl = Chol_control)
-Chol_gbm
+invisible(Chol_gbm) # output hidden to reduce clutter. Key observations noted below:
+# shrinkage of 0.01 and a smaller interaction depth provided models with the lowest RMSE values
 
 Chol_gbm_pred <- predict(Chol_gbm, Chol_test_X_imp)
 postResample(pred = Chol_gbm_pred, obs = Chol_test_y)
@@ -852,7 +854,7 @@ postResample(pred = Chol_M5rules_pred, obs = Chol_test_y)
 ```
 
 ## Cubist
-```{r}
+```{r message=FALSE, warning=FALSE}
 set.seed(123)
 Chol_cube <- train(x = Chol_tr_X_imp_fin, y = Chol_train_y, method = "cubist", trControl = Chol_control)
 
