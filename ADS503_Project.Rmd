@@ -3,8 +3,8 @@ title: "ADS 503 Project"
 author: "Hunter Blum, Brianne Bell, Eva Chow"
 date: '2022-06-21'
 output:
-  html_document: default
   word_document: default
+  html_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -422,7 +422,7 @@ xyplot(RMSE ~ ncomp, data = plot2_data, xlab = "# of Components", ylab = "RMSE (
 ### Ridge
 ```{r message=FALSE, warning=FALSE}
 set.seed(123)
-Chol_ridge <- train(x = Chol_tr_X_imp_fin, y= Chol_train_y, method = "ridge", tuneGrid = expand.grid(lambda = seq(0, .1, length = 15)), trControl = Chol_control)
+Chol_ridge <- train(x = Chol_tr_X_imp_fin, y= Chol_train_y, method = "ridge", tuneGrid = expand.grid(lambda = seq(0, .5, length = 15)), trControl = Chol_control)
 invisible(Chol_ridge) # model output hidden to reduce clutter
 
 set.seed(123)
